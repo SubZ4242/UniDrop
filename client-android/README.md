@@ -49,3 +49,13 @@ enabled = true
 The Android app uses a foreground service for reliable receiving. Android may
 still require disabling battery optimization for always-on behavior on Samsung
 devices.
+
+The Android UI also has a "Mac suchen" button. It scans the phone's local `/24`
+network for the Mac gateway endpoint, defaulting to:
+
+```text
+http://<MAC-IP>:8872/gateway
+```
+
+This discovery is informational/configuration support for the receiver app; the
+actual AirDrop-facing receiver still runs on the Mac gateway.

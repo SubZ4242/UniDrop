@@ -19,6 +19,7 @@ The tray app provides:
 
 - A droplet tray icon
 - One large AN/AUS receiver toggle
+- Mac gateway URL detection via "Mac suchen"
 - Listen URL configuration
 - Destination folder configuration
 - Windows autostart
