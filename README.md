@@ -23,7 +23,20 @@ Windows or Android UniDrop Receiver
 
 ## 🍎 macOS Gateway
 
-Install the menu bar app:
+Easiest install: download/open `gateway-macos/UniDrop-macOS.dmg`, then run
+`Install UniDrop.command` inside the mounted image. The installer copies:
+
+- `UniDrop.app` to `/Applications/UniDrop.app`;
+- gateway support scripts/config to `~/Library/Application Support/UniDrop`;
+- then starts the menu bar app.
+
+Build the DMG locally:
+
+```sh
+./gateway-macos/build-macos-dmg.sh
+```
+
+Manual developer install:
 
 ```sh
 ./scripts/install-macos-app.sh

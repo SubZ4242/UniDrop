@@ -49,7 +49,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         }
         if let bundledRoot = Bundle.main.object(forInfoDictionaryKey: "UniDropProjectRoot") as? String,
            !bundledRoot.isEmpty {
-            return bundledRoot
+            return NSString(string: bundledRoot).expandingTildeInPath
         }
         return FileManager.default.currentDirectoryPath
     }
