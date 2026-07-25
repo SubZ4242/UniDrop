@@ -31,7 +31,7 @@ The app:
 
 - starts the gateway automatically on launch;
 - shows the Mac LAN IP;
-- exposes a lightweight LAN discovery endpoint at `http://<MAC-IP>:8872/gateway`;
+- exposes a lightweight LAN discovery endpoint at `http://<MAC-IP>:8873/gateway`;
 - scans the local `/24` network for a compatible receiver on the configured port;
 - keeps the receiver IP editable for manual override;
 - exposes the AirDrop receiver name configured in `gateway-macos/config/discovery-test.toml`.
@@ -63,7 +63,7 @@ Build and install by USB debugging:
 The Android app:
 
 - runs a foreground service;
-- can scan the local `/24` network for the UniDrop Mac gateway on the configured gateway port;
+- can scan the local `/24` network for the UniDrop Mac gateway on the configured port;
 - listens on the configured port, default `8873`;
 - saves to `Downloads/UniDrop` by default;
 - can use a manually selected Android folder through the system folder picker.

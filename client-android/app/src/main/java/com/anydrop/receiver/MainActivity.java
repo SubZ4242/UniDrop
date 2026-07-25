@@ -37,7 +37,6 @@ public final class MainActivity extends Activity {
     private TextView folderView;
     private TextView gatewayView;
     private EditText portField;
-    private EditText gatewayPortField;
     private CheckBox autostartCheck;
     private SharedPreferences prefs;
 
@@ -97,17 +96,6 @@ public final class MainActivity extends Activity {
         gatewayView.setPadding(0, dp(6), 0, dp(10));
         root.addView(gatewayView);
 
-        TextView gatewayPortLabel = new TextView(this);
-        gatewayPortLabel.setText("Mac-Gateway-Port");
-        gatewayPortLabel.setTextColor(Color.rgb(70, 70, 78));
-        root.addView(gatewayPortLabel);
-
-        gatewayPortField = new EditText(this);
-        gatewayPortField.setSingleLine(true);
-        gatewayPortField.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        gatewayPortField.setText(String.valueOf(prefs.getInt(ReceiverService.KEY_GATEWAY_PORT, 8872)));
-        root.addView(gatewayPortField);
-
         Button discoverGateway = new Button(this);
         discoverGateway.setText("Mac suchen");
         discoverGateway.setOnClickListener(v -> discoverMacGateway());
@@ -117,7 +105,7 @@ public final class MainActivity extends Activity {
         ));
 
         TextView portLabel = new TextView(this);
-        portLabel.setText("Empfänger-Port");
+        portLabel.setText("Port");
         portLabel.setTextColor(Color.rgb(70, 70, 78));
         root.addView(portLabel);
 
@@ -216,32 +204,19 @@ public final class MainActivity extends Activity {
         return 8873;
     }
 
-    private int parseGatewayPort() {
-        try {
-            int port = Integer.parseInt(gatewayPortField.getText().toString().trim());
-            if (port >= 1024 && port <= 65535) {
-                return port;
-            }
-        } catch (NumberFormatException ignored) {
-        }
-        gatewayPortField.setText("8872");
-        return 8872;
-    }
-
     private void refreshUi() {
         boolean running = prefs.getBoolean(ReceiverService.KEY_RUNNING, false);
         int port = prefs.getInt(ReceiverService.KEY_PORT, 8873);
         String last = prefs.getString(ReceiverService.KEY_LAST_STATUS, "");
         String ip = localIpv4();
         String gatewayHost = prefs.getString(ReceiverService.KEY_GATEWAY_HOST, "");
-        int gatewayPort = prefs.getInt(ReceiverService.KEY_GATEWAY_PORT, 8872);
         statusView.setText(running ? "Status: running" : "Status: stopped" + (last.isEmpty() ? "" : " · " + last));
         urlView.setText(ip == null
             ? "Telefon-WLAN-IP nicht gefunden. WLAN prüfen."
             : "Empfänger-URL: http://" + ip + ":" + port);
         gatewayView.setText(gatewayHost == null || gatewayHost.isEmpty()
             ? "Mac-Gateway: nicht gesucht"
-            : "Mac-Gateway: http://" + gatewayHost + ":" + gatewayPort + "/gateway");
+            : "Mac-Gateway: http://" + gatewayHost + ":" + port + "/gateway");
         String tree = prefs.getString(ReceiverService.KEY_OUTPUT_TREE_URI, "");
         folderView.setText(tree == null || tree.isEmpty()
             ? "Zielordner: Downloads/UniDrop"
@@ -249,11 +224,11 @@ public final class MainActivity extends Activity {
     }
 
     private void discoverMacGateway() {
-        int gatewayPort = parseGatewayPort();
-        prefs.edit().putInt(ReceiverService.KEY_GATEWAY_PORT, gatewayPort).apply();
+        int port = parsePort();
+        prefs.edit().putInt(ReceiverService.KEY_PORT, port).apply();
         gatewayView.setText("Mac-Gateway: suche...");
         new Thread(() -> {
-            String host = findGatewayHost(gatewayPort);
+            String host = findGatewayHost(port);
             runOnUiThread(() -> {
                 if (host == null) {
                     prefs.edit().remove(ReceiverService.KEY_GATEWAY_HOST).apply();
@@ -261,7 +236,7 @@ public final class MainActivity extends Activity {
                 } else {
                     prefs.edit()
                         .putString(ReceiverService.KEY_GATEWAY_HOST, host)
-                        .putInt(ReceiverService.KEY_GATEWAY_PORT, gatewayPort)
+                        .putInt(ReceiverService.KEY_PORT, port)
                         .apply();
                     refreshUi();
                 }

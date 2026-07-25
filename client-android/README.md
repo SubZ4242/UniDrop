@@ -54,7 +54,7 @@ The Android UI also has a "Mac suchen" button. It scans the phone's local `/24`
 network for the Mac gateway endpoint, defaulting to:
 
 ```text
-http://<MAC-IP>:8872/gateway
+http://<MAC-IP>:8873/gateway
 ```
 
 This discovery is informational/configuration support for the receiver app; the

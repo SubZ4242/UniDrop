@@ -17,7 +17,7 @@ app.MapGet("/health", (HttpRequest request) =>
     return Results.Json(new
     {
         status = "ok",
-        receiver = "UniDrop Windows Receiver",
+        receiver = ReceiverInfo.DisplayName,
         version = ReceiverInfo.Version,
         supportedContentTypes = ReceiverInfo.SupportedContentTypes,
         outputDirectory = options.OutputDirectory
@@ -107,6 +107,7 @@ await app.RunAsync();
 static class ReceiverInfo
 {
     public const string Version = "0.3.10-gateway-spool-autoreveal";
+    public static readonly string DisplayName = $"UniDrop {Environment.MachineName}";
     public static readonly TimeSpan UploadIdleTimeout = TimeSpan.FromSeconds(15);
     public static readonly string[] SupportedContentTypes =
     [

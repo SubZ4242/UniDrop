@@ -6,7 +6,7 @@ bonjour_host = "unidrop-gateway"
 
 [network]
 interface = "awdl0"
-port = 8872
+port = 8873
 windows_host = ""
 windows_port = 8873
 

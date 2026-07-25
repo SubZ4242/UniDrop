@@ -325,14 +325,17 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     @objc private func saveForwarding() {
         var host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        var detectedName: String?
         if Int(port) == nil {
             statusLabel.stringValue = "Port pruefen"
             return
         }
         if host.isEmpty || host.lowercased() == "auto" {
-            if let detected = discoverReceiver(port: port).receiverIp {
+            let detectedReceiver = discoverReceiver(port: port)
+            if let detected = detectedReceiver.receiverIp {
                 host = detected
                 hostField.stringValue = detected
+                detectedName = detectedReceiver.receiverName
             } else {
                 statusLabel.stringValue = "Kein Empfänger auf Port \(port) gefunden"
                 return
@@ -341,13 +344,21 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         setControlsEnabled(false)
         statusLabel.stringValue = "Speichere Konfiguration..."
         DispatchQueue.global(qos: .utility).async {
+            var arguments = [
+                "--windows-host", host,
+                "--windows-port", port,
+                "--gateway-port", port,
+                "--enabled", "true"
+            ]
+            if let receiverName = detectedName {
+                arguments += [
+                    "--display-name", receiverName,
+                    "--model-name", self.modelName(for: receiverName),
+                ]
+            }
             let result = self.runPythonScript(
                 "configure-forwarding.py",
-                arguments: [
-                    "--windows-host", host,
-                    "--windows-port", port,
-                    "--enabled", "true"
-                ]
+                arguments: arguments
             )
             DispatchQueue.main.async {
                 if result.exitCode != 0 {
@@ -435,16 +446,22 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     private func refreshNetworkInfo() {
         let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         DispatchQueue.global(qos: .utility).async {
-            let discovered = self.discoverReceiver(port: port.isEmpty ? "8873" : port)
+            let effectivePort = port.isEmpty ? "8873" : port
+            let discovered = self.discoverReceiver(port: effectivePort)
             if let receiverIp = discovered.receiverIp {
-                _ = self.runPythonScript(
-                    "configure-forwarding.py",
-                    arguments: [
-                        "--windows-host", receiverIp,
-                        "--windows-port", port.isEmpty ? "8873" : port,
-                        "--enabled", "true",
+                var arguments = [
+                    "--windows-host", receiverIp,
+                    "--windows-port", effectivePort,
+                    "--gateway-port", effectivePort,
+                    "--enabled", "true",
+                ]
+                if let receiverName = discovered.receiverName {
+                    arguments += [
+                        "--display-name", receiverName,
+                        "--model-name", self.modelName(for: receiverName),
                     ]
-                )
+                }
+                _ = self.runPythonScript("configure-forwarding.py", arguments: arguments)
             }
             DispatchQueue.main.async {
                 if let localIp = discovered.localIp {
@@ -461,14 +478,27 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         }
     }
 
-    private func discoverReceiver(port: String) -> (localIp: String?, receiverIp: String?) {
+    private func discoverReceiver(port: String) -> (localIp: String?, receiverIp: String?, receiverName: String?) {
         let result = runPythonScript("discover-receiver.py", arguments: ["--port", port])
         let localIp = match(result.output, #"(?m)^local_ip=(.+)$"#)
         let receiverIp = match(result.output, #"(?m)^receiver_ip=(.+)$"#)
+        let receiverName = match(result.output, #"(?m)^receiver_name=(.+)$"#)
         return (
             localIp: localIp?.trimmingCharacters(in: .whitespacesAndNewlines),
-            receiverIp: receiverIp?.trimmingCharacters(in: .whitespacesAndNewlines)
+            receiverIp: receiverIp?.trimmingCharacters(in: .whitespacesAndNewlines),
+            receiverName: receiverName?.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    private func modelName(for receiverName: String) -> String {
+        let lower = receiverName.lowercased()
+        if lower.contains("galaxy") || lower.contains("android") {
+            return "Android Phone"
+        }
+        if lower.contains("windows") {
+            return "Windows PC"
+        }
+        return "UniDrop Receiver"
     }
 
     private func loadForwardingConfig() {

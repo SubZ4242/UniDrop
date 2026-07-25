@@ -290,7 +290,8 @@ sealed class WinDropTrayContext : ApplicationContext
                 return false;
             }
             var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            return body.Contains("WinDrop Windows Receiver", StringComparison.OrdinalIgnoreCase);
+            return body.Contains("UniDrop", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("WinDrop Windows Receiver", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -898,7 +899,7 @@ static class MacGatewayDiscovery
         {
             return uri.Port;
         }
-        return 8872;
+        return 8873;
     }
 
     private static bool IsUniDropGateway(string ip, int port)

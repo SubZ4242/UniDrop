@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_DIR="$PROJECT_ROOT/.runtime/discovery-test"
-SERVICE_ID=7c91d40a88f2
+SERVICE_ID=d4c7a9e2106b
 LAUNCHD_LABEL="com.windrop.gateway.discovery-test"
 
 printf 'AWDL interface\n'
@@ -16,9 +16,9 @@ SHARINGD_PID=$(pgrep -x sharingd | sed -n '1p' || true)
 if [ -n "$SHARINGD_PID" ]; then
     lsof -nP -a -p "$SHARINGD_PID" -i 2>/dev/null || true
 fi
-printf 'Recent native sharingd evidence involving UniDrop port 8872:\n'
+printf 'Recent native sharingd evidence involving UniDrop port 8873:\n'
 /usr/bin/log show --last 10m --style compact \
-    --predicate 'process == "sharingd" AND eventMessage CONTAINS "8872"' \
+    --predicate 'process == "sharingd" AND eventMessage CONTAINS "8873"' \
     2>/dev/null \
     | rg 'Bonjour|interface: awdl0|bytes in/out' \
     | tail -n 30 \

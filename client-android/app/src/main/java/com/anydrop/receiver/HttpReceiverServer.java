@@ -1,6 +1,7 @@
 package com.unidrop.receiver;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -97,7 +98,7 @@ public final class HttpReceiverServer {
             }
             if ("GET".equals(request.method) && "/health".equals(request.path)) {
                 byte[] body = (
-                    "{\"status\":\"ok\",\"receiver\":\"UniDrop Android Receiver\",\"version\":\"0.1.0\",\"outputDirectory\":\"Downloads/UniDrop\"}"
+                    "{\"status\":\"ok\",\"receiver\":\"" + receiverName() + "\",\"version\":\"0.1.0\",\"outputDirectory\":\"Downloads/UniDrop\"}"
                 ).getBytes(StandardCharsets.UTF_8);
                 writeResponse(output, 200, "application/json", body);
                 return;
@@ -239,6 +240,17 @@ public final class HttpReceiverServer {
 
     private String jsonError(String error) {
         return "{\"status\":\"failed\",\"error\":\"" + error + "\"}";
+    }
+
+    private String receiverName() {
+        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+        if (model.toUpperCase(Locale.ROOT).startsWith("SM-G97")) {
+            return "UniDrop Galaxy S10";
+        }
+        if (model.isEmpty()) {
+            return "UniDrop Android";
+        }
+        return "UniDrop " + model.replace("\"", "");
     }
 
     private String savedJson(List<String> files) {

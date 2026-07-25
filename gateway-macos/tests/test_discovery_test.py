@@ -32,7 +32,7 @@ class DiscoveryConfigTests(unittest.TestCase):
             bonjour_host = "halils-windows-pc-windrop"
             [network]
             interface = "awdl0"
-            port = 8872
+            port = 8873
             """
         )
         response = plistlib.loads(MODULE.build_discover_response(config))
@@ -51,7 +51,7 @@ class DiscoveryConfigTests(unittest.TestCase):
                 bonjour_host = "test"
                 [network]
                 interface = "awdl0"
-                port = 8872
+                port = 8873
                 """
             )
 
@@ -81,7 +81,7 @@ class DiscoveryConfigTests(unittest.TestCase):
                 bonjour_host = "test"
                 [network]
                 interface = "awdl0"
-                port = 8872
+                port = 8873
                 [forwarding]
                 enabled = true
                 """
