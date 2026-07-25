@@ -436,6 +436,16 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         DispatchQueue.global(qos: .utility).async {
             let discovered = self.discoverReceiver(port: port.isEmpty ? "8873" : port)
+            if let receiverIp = discovered.receiverIp {
+                _ = self.runPythonScript(
+                    "configure-forwarding.py",
+                    arguments: [
+                        "--windows-host", receiverIp,
+                        "--windows-port", port.isEmpty ? "8873" : port,
+                        "--enabled", "true",
+                    ]
+                )
+            }
             DispatchQueue.main.async {
                 if let localIp = discovered.localIp {
                     self.macIpLabel.stringValue = "Mac-IP: \(localIp)"
@@ -445,6 +455,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
                 if let receiverIp = discovered.receiverIp {
                     self.hostField.stringValue = receiverIp
                     self.statusLabel.stringValue = "Empfänger gefunden: \(receiverIp)"
+                    self.restartDiscoveryAfterConfigChange()
                 }
             }
         }
