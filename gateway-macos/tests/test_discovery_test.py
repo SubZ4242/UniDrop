@@ -120,6 +120,86 @@ class DiscoveryConfigTests(unittest.TestCase):
             self.assertEqual(total, len(cpio))
             self.assertEqual(output_path.read_bytes(), cpio)
 
+    def test_resolve_receiver_reuses_cached_target(self):
+        config = self.load_config(
+            """
+            [receiver]
+            display_name = "S10 von Serhat"
+            model_name = "Android Phone"
+            service_id = "001122334455"
+            bonjour_host = "test"
+            [network]
+            interface = "awdl0"
+            port = 8873
+            windows_port = 8873
+            [forwarding]
+            enabled = true
+            """
+        )
+        receiver = MODULE.ReceiverProbe("192.168.178.60", "S10 von Serhat", "android")
+        calls = {"discover": 0, "probe": 0}
+        original_discover = MODULE.discover_receiver
+        original_probe = MODULE.probe_receiver
+        MODULE.clear_cached_receiver(config)
+
+        def fake_discover(_config):
+            calls["discover"] += 1
+            return receiver
+
+        def fake_probe(_config, host, timeout=None):
+            calls["probe"] += 1
+            self.assertEqual(host, receiver.host)
+            return receiver
+
+        try:
+            MODULE.discover_receiver = fake_discover
+            MODULE.probe_receiver = fake_probe
+            self.assertEqual(MODULE.resolve_receiver(config), receiver)
+            self.assertEqual(MODULE.resolve_receiver(config), receiver)
+        finally:
+            MODULE.discover_receiver = original_discover
+            MODULE.probe_receiver = original_probe
+            MODULE.clear_cached_receiver(config)
+
+        self.assertEqual(calls["discover"], 1)
+        self.assertEqual(calls["probe"], 1)
+
+    def test_ask_can_continue_without_blocking_auto_discovery(self):
+        config = self.load_config(
+            """
+            [receiver]
+            display_name = "S10 von Serhat"
+            model_name = "Android Phone"
+            service_id = "001122334455"
+            bonjour_host = "test"
+            [network]
+            interface = "awdl0"
+            port = 8873
+            windows_port = 8873
+            [forwarding]
+            enabled = true
+            """
+        )
+        calls = {"threads": 0}
+        original_thread = MODULE.threading.Thread
+        MODULE.clear_cached_receiver(config)
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                calls["threads"] += 1
+
+        try:
+            MODULE.threading.Thread = FakeThread
+            self.assertTrue(MODULE.ask_can_continue(config))
+        finally:
+            MODULE.threading.Thread = original_thread
+            MODULE.clear_cached_receiver(config)
+
+        self.assertEqual(calls["threads"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

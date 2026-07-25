@@ -35,6 +35,8 @@ IPV6_BOUND_IF = 125
 MAX_DISCOVER_REQUEST_BYTES = 1_048_576
 MAX_ASK_REQUEST_BYTES = 1_048_576
 UPLOAD_IDLE_TIMEOUT_SECONDS = 20
+RECEIVER_CACHE_TTL_SECONDS = 60
+RECEIVER_CACHE_PROBE_TIMEOUT_SECONDS = 0.25
 SERVICE_TYPE = "_airdrop._tcp"
 ADDRESS_SAFETY_CHECK_SECONDS = 60
 SUPPORTED_UPLOAD_CONTENT_TYPES = {
@@ -121,6 +123,16 @@ class ReceiverProbe:
     host: str
     name: str
     platform: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class CachedReceiver:
+    receiver: ReceiverProbe
+    expires_at: float
+
+
+RECEIVER_CACHE: dict[str, CachedReceiver] = {}
+RECEIVER_CACHE_LOCK = threading.Lock()
 
 
 def interface_ipv6(interface: str) -> tuple[str, int]:
@@ -375,9 +387,61 @@ def receiver_matches_display_target(config: DiscoveryConfig, receiver: ReceiverP
     return False
 
 
+def receiver_cache_key(config: DiscoveryConfig) -> str:
+    return f"{config.service_id}:{config.display_name}:{config.model_name}:{config.windows_port}"
+
+
+def cache_receiver(config: DiscoveryConfig, receiver: ReceiverProbe) -> None:
+    key = receiver_cache_key(config)
+    with RECEIVER_CACHE_LOCK:
+        RECEIVER_CACHE[key] = CachedReceiver(
+            receiver=receiver,
+            expires_at=time.monotonic() + RECEIVER_CACHE_TTL_SECONDS,
+        )
+
+
+def clear_cached_receiver(config: DiscoveryConfig) -> None:
+    with RECEIVER_CACHE_LOCK:
+        RECEIVER_CACHE.pop(receiver_cache_key(config), None)
+
+
+def cached_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
+    key = receiver_cache_key(config)
+    now = time.monotonic()
+    with RECEIVER_CACHE_LOCK:
+        cached = RECEIVER_CACHE.get(key)
+        if cached is None:
+            return None
+        if cached.expires_at <= now:
+            RECEIVER_CACHE.pop(key, None)
+            return None
+        candidate = cached.receiver
+
+    refreshed = probe_receiver(
+        config,
+        candidate.host,
+        timeout=RECEIVER_CACHE_PROBE_TIMEOUT_SECONDS,
+    )
+    if refreshed is None or not receiver_matches_display_target(config, refreshed):
+        clear_cached_receiver(config)
+        return None
+    cache_receiver(config, refreshed)
+    LOGGER.debug(
+        "Using cached receiver %s at %s:%d for %s",
+        refreshed.name,
+        refreshed.host,
+        config.windows_port,
+        config.display_name,
+    )
+    return refreshed
+
+
 def resolve_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
     if not config.forwarding_enabled:
         return None
+    cached = cached_receiver(config)
+    if cached is not None:
+        return cached
     if config.windows_host:
         result = probe_receiver(config, config.windows_host)
         if result is None:
@@ -389,15 +453,46 @@ def resolve_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
                 result.host,
                 config.display_name,
             )
+            clear_cached_receiver(config)
             return None
+        if result is not None:
+            cache_receiver(config, result)
         return result
-    return discover_receiver(config)
+    result = discover_receiver(config)
+    if result is not None:
+        cache_receiver(config, result)
+    return result
+
+
+def warm_receiver_cache(config: DiscoveryConfig) -> None:
+    if not config.forwarding_enabled:
+        return
+    try:
+        resolve_receiver(config)
+    except Exception:
+        LOGGER.exception("Receiver cache warmup failed")
 
 
 def check_windows_receiver(config: DiscoveryConfig) -> bool:
     if not config.forwarding_enabled:
         return False
     return resolve_receiver(config) is not None
+
+
+def ask_can_continue(config: DiscoveryConfig) -> bool:
+    if not config.forwarding_enabled:
+        return False
+    if config.windows_host:
+        return resolve_receiver(config) is not None
+    if cached_receiver(config) is None:
+        LOGGER.warning("Accepting /Ask for %s while receiver cache refresh runs in background", config.display_name)
+        threading.Thread(
+            target=warm_receiver_cache,
+            args=(config,),
+            name="receiver-cache-refresh",
+            daemon=True,
+        ).start()
+    return True
 
 
 class DiscoveryRequestHandler(BaseHTTPRequestHandler):
@@ -531,7 +626,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             len(items) if isinstance(items, list) else 0,
         )
 
-        if not check_windows_receiver(self.discovery_config):
+        if not ask_can_continue(self.discovery_config):
             LOGGER.warning("Rejected /Ask because no receiver is available or forwarding is disabled")
             self._send_bytes(503, b"", "application/octet-stream")
             return
@@ -1070,6 +1165,12 @@ def run() -> int:
 
     server, server_thread = start_https_server(ipv6_address, interface_index)
     lan_status = start_lan_status_server()
+    threading.Thread(
+        target=warm_receiver_cache,
+        args=(config,),
+        name="receiver-cache-warmup",
+        daemon=True,
+    ).start()
 
     registration = BonjourRegistration(config, ipv6_address, args.runtime_dir)
     registration.start()

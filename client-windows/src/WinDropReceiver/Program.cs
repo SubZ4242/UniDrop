@@ -5,6 +5,10 @@ var options = ReceiverOptions.Parse(args);
 Directory.CreateDirectory(options.OutputDirectory);
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.Limits.MaxRequestBodySize = null;
+});
 builder.WebHost.UseUrls(options.ListenUrl);
 var app = builder.Build();
 
@@ -108,7 +112,7 @@ await app.RunAsync();
 
 static class ReceiverInfo
 {
-    public const string Version = "0.3.10-gateway-spool-autoreveal";
+    public const string Version = "0.3.11-large-upload-kestrel";
     public static readonly string DisplayName = Environment.MachineName;
     public static readonly TimeSpan UploadIdleTimeout = TimeSpan.FromSeconds(15);
     public static readonly string[] SupportedContentTypes =
