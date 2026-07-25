@@ -220,6 +220,7 @@ def dvzip_diagnostics(path: Path) -> dict[str, Any]:
 def expand_dvzip_to_cpio(input_path: Path, output_path: Path) -> int:
     total = 0
     with input_path.open("rb") as source, output_path.open("wb") as output:
+        chunk_index = 0
         while True:
             length_bytes = source.read(4)
             if not length_bytes:
@@ -230,13 +231,34 @@ def expand_dvzip_to_cpio(input_path: Path, output_path: Path) -> int:
             compressed = source.read(compressed_length)
             if len(compressed) != compressed_length:
                 raise EOFError("DVZip chunk ended before advertised length")
-            try:
-                decompressed = zlib.decompress(compressed)
-            except zlib.error:
-                decompressed = zlib.decompress(compressed, -zlib.MAX_WBITS)
+            decompressed = decompress_dvzip_chunk(compressed, chunk_index)
             output.write(decompressed)
             total += len(decompressed)
+            chunk_index += 1
     return total
+
+
+def decompress_dvzip_chunk(compressed: bytes, chunk_index: int) -> bytes:
+    if compressed.startswith((b"070701", b"070702", b"070707")):
+        return compressed
+
+    errors: list[str] = []
+    for label, window_bits in (
+        ("zlib", zlib.MAX_WBITS),
+        ("zlib_or_gzip", zlib.MAX_WBITS | 32),
+        ("raw_deflate", -zlib.MAX_WBITS),
+    ):
+        try:
+            decompressor = zlib.decompressobj(window_bits)
+            data = decompressor.decompress(compressed)
+            data += decompressor.flush()
+            if data:
+                return data
+            errors.append(f"{label}: empty output")
+        except zlib.error as exc:
+            errors.append(f"{label}: {exc}")
+
+    raise zlib.error(f"Could not decompress DVZip chunk {chunk_index}: {'; '.join(errors)}")
 
 
 def windows_headers(config: DiscoveryConfig) -> dict[str, str]:
