@@ -23,12 +23,13 @@ Windows or Android UniDrop Receiver
 
 ## 🍎 macOS Gateway
 
-Easiest install: download/open `gateway-macos/UniDrop-macOS.dmg`, then run
-`Install UniDrop.command` inside the mounted image. The installer copies:
+Easiest install: download/open `gateway-macos/UniDrop-macOS.dmg`, then drag
+`UniDrop.app` onto `Applications` in the DMG window. Then run
+`Install Support.command` inside the mounted image. The support installer copies:
 
-- `UniDrop.app` to `/Applications/UniDrop.app`;
-- gateway support scripts/config to `~/Library/Application Support/UniDrop`;
-- then starts the menu bar app.
+- gateway support scripts/config to `~/Library/Application Support/UniDrop`.
+
+After that, start `UniDrop` from Applications.
 
 Build the DMG locally:
 

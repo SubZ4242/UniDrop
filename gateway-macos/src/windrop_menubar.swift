@@ -9,11 +9,14 @@ private struct ScriptResult {
 private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate {
     private let launchdLabel = "com.windrop.gateway.menubar"
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let defaults = UserDefaults.standard
+    private let hideMenuBarKey = "hideMenuBarIcon"
     private var window: NSWindow?
     private var statusLabel = NSTextField(labelWithString: "Status: pruefe...")
     private var macIpLabel = NSTextField(labelWithString: "Mac-IP: suche...")
     private var portField = NSTextField(string: "8873")
     private var autostartCheck = NSButton(checkboxWithTitle: "Mit macOS starten", target: nil, action: nil)
+    private var hideMenuBarCheck = NSButton(checkboxWithTitle: "Symbol oben ausblenden", target: nil, action: nil)
     private var toggleButton: NSButton?
     private var isDiscoveryRunning = false
     private var timer: Timer?
@@ -42,6 +45,11 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         return false
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow()
+        return false
+    }
+
     private func parseProjectRoot() -> String {
         let args = CommandLine.arguments
         if let index = args.firstIndex(of: "--project-root"), index + 1 < args.count {
@@ -58,17 +66,18 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         guard let button = statusItem.button else {
             return
         }
-        button.image = dropletImage(color: .labelColor)
-        button.image?.isTemplate = true
+        button.image = dropletImage(color: .white)
+        button.image?.isTemplate = false
         button.toolTip = "UniDrop"
         button.target = self
         button.action = #selector(toggleWindow)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        applyMenuBarVisibility()
     }
 
     private func buildWindow() {
         let panel = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 244),
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 276),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -106,12 +115,17 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         autostartCheck.action = #selector(toggleAutostart)
         autostartCheck.translatesAutoresizingMaskIntoConstraints = false
 
+        hideMenuBarCheck.target = self
+        hideMenuBarCheck.action = #selector(toggleMenuBarVisibility)
+        hideMenuBarCheck.translatesAutoresizingMaskIntoConstraints = false
+
         portField.placeholderString = "8873"
         portField.delegate = self
         loadForwardingConfig()
         loadAutostartState()
+        loadMenuBarVisibilityState()
 
-        [icon, title, statusLabel, macIpLabel, portRow, autostartCheck, buttonRow].forEach(content.addSubview)
+        [icon, title, statusLabel, macIpLabel, portRow, autostartCheck, hideMenuBarCheck, buttonRow].forEach(content.addSubview)
 
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
@@ -141,7 +155,11 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
 
             buttonRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
             buttonRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
-            buttonRow.topAnchor.constraint(equalTo: autostartCheck.bottomAnchor, constant: 18),
+            hideMenuBarCheck.leadingAnchor.constraint(equalTo: autostartCheck.leadingAnchor),
+            hideMenuBarCheck.trailingAnchor.constraint(equalTo: autostartCheck.trailingAnchor),
+            hideMenuBarCheck.topAnchor.constraint(equalTo: autostartCheck.bottomAnchor, constant: 8),
+
+            buttonRow.topAnchor.constraint(equalTo: hideMenuBarCheck.bottomAnchor, constant: 18),
         ])
 
         self.window = panel
@@ -218,6 +236,13 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             window.orderOut(nil)
             return
         }
+        showWindow()
+    }
+
+    private func showWindow() {
+        guard let window else {
+            return
+        }
         if let button = statusItem.button, let screen = button.window?.screen {
             let buttonFrame = button.window?.convertToScreen(button.frame) ?? .zero
             let x = min(max(buttonFrame.midX - window.frame.width / 2, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - window.frame.width - 8)
@@ -281,7 +306,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             statusLabel.stringValue = "Status: stopped"
         }
         toggleButton?.title = running ? "Stoppen" : "Starten"
-        statusItem.button?.contentTintColor = running ? .systemBlue : .secondaryLabelColor
+        statusItem.button?.contentTintColor = nil
     }
 
     @objc private func toggleDiscovery() {
@@ -313,6 +338,11 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
                 self.loadAutostartState()
             }
         }
+    }
+
+    @objc private func toggleMenuBarVisibility() {
+        defaults.set(hideMenuBarCheck.state == .on, forKey: hideMenuBarKey)
+        applyMenuBarVisibility()
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -395,6 +425,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     private func setControlsEnabled(_ enabled: Bool) {
         portField.isEnabled = enabled
         autostartCheck.isEnabled = enabled
+        hideMenuBarCheck.isEnabled = enabled
         toggleButton?.isEnabled = enabled
     }
 
@@ -512,6 +543,15 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         let result = runScript("status-macos-autostart.sh")
         let installed = result.output.contains("installed/running") || result.output.contains("installed/not-loaded")
         autostartCheck.state = installed ? .on : .off
+    }
+
+    private func loadMenuBarVisibilityState() {
+        hideMenuBarCheck.state = defaults.bool(forKey: hideMenuBarKey) ? .on : .off
+        applyMenuBarVisibility()
+    }
+
+    private func applyMenuBarVisibility() {
+        statusItem.isVisible = !defaults.bool(forKey: hideMenuBarKey)
     }
 
     private func match(_ text: String, _ pattern: String) -> String? {

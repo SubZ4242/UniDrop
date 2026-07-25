@@ -8,12 +8,12 @@ DMG_PATH="$SCRIPT_DIR/UniDrop-macOS.dmg"
 VOLUME_NAME="UniDrop macOS"
 APP_NAME="UniDrop.app"
 SUPPORT_NAME="UniDrop Support"
-INSTALLER_NAME="Install UniDrop.command"
+SUPPORT_INSTALLER_NAME="Install Support.command"
 APP_SUPPORT_TARGET="~/Library/Application Support/UniDrop"
 
 STAGE_DIR="$BUILD_ROOT/stage"
 APP_PATH="$STAGE_DIR/$APP_NAME"
-SUPPORT_DIR="$STAGE_DIR/$SUPPORT_NAME"
+SUPPORT_DIR="$STAGE_DIR/.support/$SUPPORT_NAME"
 CONTENTS_DIR="$APP_PATH/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -110,38 +110,37 @@ cp "$PROJECT_ROOT"/scripts/*.sh "$SUPPORT_DIR/scripts/"
 cp "$PROJECT_ROOT"/scripts/*.py "$SUPPORT_DIR/scripts/"
 chmod 755 "$SUPPORT_DIR"/scripts/*.sh "$SUPPORT_DIR"/scripts/*.py "$SUPPORT_DIR/gateway-macos/src/discovery_test.py"
 
-cat > "$STAGE_DIR/$INSTALLER_NAME" <<'SH'
+ln -s /Applications "$STAGE_DIR/Applications"
+
+cat > "$STAGE_DIR/$SUPPORT_INSTALLER_NAME" <<'SH'
 #!/bin/sh
 set -eu
 
 SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-SUPPORT_SOURCE="$SOURCE_DIR/UniDrop Support"
+SUPPORT_SOURCE="$SOURCE_DIR/.support/UniDrop Support"
 SUPPORT_TARGET="$HOME/Library/Application Support/UniDrop"
-APP_SOURCE="$SOURCE_DIR/UniDrop.app"
-APP_TARGET="/Applications/UniDrop.app"
 
 mkdir -p "$SUPPORT_TARGET"
 ditto "$SUPPORT_SOURCE" "$SUPPORT_TARGET"
-ditto "$APP_SOURCE" "$APP_TARGET"
-open "$APP_TARGET"
 
-printf 'UniDrop wurde installiert und gestartet.\n'
-printf 'App: %s\n' "$APP_TARGET"
+printf 'UniDrop Support wurde installiert.\n'
 printf 'Support-Dateien: %s\n' "$SUPPORT_TARGET"
+printf 'Ziehe UniDrop.app danach in Applications und starte die App dort.\n'
 SH
-chmod 755 "$STAGE_DIR/$INSTALLER_NAME"
+chmod 755 "$STAGE_DIR/$SUPPORT_INSTALLER_NAME"
 
 cat > "$STAGE_DIR/README.txt" <<'TXT'
 UniDrop macOS Gateway
 
 Installation:
-1. "Install UniDrop.command" doppelklicken.
-2. Falls macOS warnt: Rechtsklick -> Oeffnen.
-3. UniDrop wird nach /Applications kopiert und direkt gestartet.
+1. UniDrop.app auf Applications ziehen.
+2. "Install Support.command" starten.
+3. UniDrop aus Applications starten.
 
-Die Gateway-Support-Dateien werden nach:
-~/Library/Application Support/UniDrop
-kopiert.
+Falls macOS warnt: Rechtsklick -> Oeffnen.
+
+Die Gateway-Support-Dateien werden nach
+~/Library/Application Support/UniDrop kopiert.
 
 Zum Entfernen:
 1. UniDrop beenden.
