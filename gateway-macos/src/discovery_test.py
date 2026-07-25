@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin python3
 """Minimal, discovery-only legacy AirDrop receiver for macOS/AWDL tests."""
 
 from __future__ import annotations

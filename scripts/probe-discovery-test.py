@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin python3
 """Probe the running UniDrop /Discover endpoint over its scoped AWDL address."""
 
 from __future__ import annotations

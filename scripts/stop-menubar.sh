@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 LAUNCHD_LABEL="com.windrop.gateway.menubar"
 

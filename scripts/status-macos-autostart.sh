@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 for LABEL in com.windrop.gateway.menubar.autostart com.windrop.gateway.discovery.autostart; do
     if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then

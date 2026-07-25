@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 MENUBAR_LABEL="com.windrop.gateway.menubar.autostart"

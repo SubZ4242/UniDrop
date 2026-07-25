@@ -25,7 +25,9 @@ import java.net.Inet4Address;
 import java.net.HttpURLConnection;
 import java.net.NetworkInterface;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
@@ -271,22 +273,53 @@ public final class MainActivity extends Activity {
 
     private String localIpv4() {
         try {
+            ArrayList<String> fallback = new ArrayList<>();
             for (NetworkInterface networkInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (!networkInterface.isUp() || networkInterface.isLoopback()) {
+                String interfaceName = networkInterface.getName().toLowerCase(Locale.ROOT);
+                String displayName = networkInterface.getDisplayName().toLowerCase(Locale.ROOT);
+                if (!networkInterface.isUp()
+                    || networkInterface.isLoopback()
+                    || interfaceName.startsWith("rmnet")
+                    || interfaceName.startsWith("ccmni")
+                    || interfaceName.startsWith("tun")
+                    || interfaceName.startsWith("tap")
+                    || interfaceName.startsWith("p2p")
+                    || displayName.contains("vpn")) {
                     continue;
                 }
                 for (java.net.InetAddress address : Collections.list(networkInterface.getInetAddresses())) {
                     if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
                         String ip = address.getHostAddress();
-                        if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+                        if (!isPrivateIpv4(ip)) {
+                            continue;
+                        }
+                        if (interfaceName.startsWith("wlan") || displayName.contains("wi-fi") || displayName.contains("wifi")) {
                             return ip;
                         }
+                        fallback.add(ip);
                     }
                 }
+            }
+            if (!fallback.isEmpty()) {
+                return fallback.get(0);
             }
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private boolean isPrivateIpv4(String ip) {
+        String[] parts = ip.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+        try {
+            int a = Integer.parseInt(parts[0]);
+            int b = Integer.parseInt(parts[1]);
+            return a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     private String findGatewayHost(int port) {

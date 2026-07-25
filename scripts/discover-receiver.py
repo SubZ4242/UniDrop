@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin python3
 """Find a UniDrop receiver on the local /24 LAN by probing /health."""
 
 from __future__ import annotations

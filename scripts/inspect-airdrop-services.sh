@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -20,12 +22,12 @@ printf 'Recent native sharingd evidence involving UniDrop port 8873:\n'
 /usr/bin/log show --last 10m --style compact \
     --predicate 'process == "sharingd" AND eventMessage CONTAINS "8873"' \
     2>/dev/null \
-    | rg 'Bonjour|interface: awdl0|bytes in/out' \
+    | grep -E 'Bonjour|interface: awdl0|bytes in/out' \
     | tail -n 30 \
     || true
 
 printf '\nUniDrop process, identity, endpoint, and bound interface\n'
-launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" 2>/dev/null | rg 'state =|pid =|program =|arguments =|runs =' || printf 'UniDrop launchd job not found\n'
+launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" 2>/dev/null | grep -E 'state =|pid =|program =|arguments =|runs =' || printf 'UniDrop launchd job not found\n'
 if [ -f "$RUNTIME_DIR/server.pid" ]; then
     WINDROP_PID=$(sed -n '1p' "$RUNTIME_DIR/server.pid")
     ps -p "$WINDROP_PID" -o pid=,ppid=,state=,etime=,%cpu=,rss=,command= || true

@@ -6,6 +6,8 @@ private struct ScriptResult {
     let output: String
 }
 
+private let safeProcessPath = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate {
     private let launchdLabel = "com.windrop.gateway.menubar"
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -538,6 +540,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             .appendingPathComponent("scripts")
             .appendingPathComponent(name)
         process.executableURL = scriptURL
+        process.environment = environmentWithSafePath()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -556,6 +559,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     private func runPythonScript(_ name: String, arguments: [String]) -> ScriptResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.environment = environmentWithSafePath()
         process.arguments = [
             "python3",
             URL(fileURLWithPath: projectRoot).appendingPathComponent("scripts").appendingPathComponent(name).path,
@@ -605,6 +609,12 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             return compact
         }
         return String(compact.prefix(1200)) + "..."
+    }
+
+    private func environmentWithSafePath() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = safeProcessPath
+        return environment
     }
 
     private func refreshNetworkInfo() {

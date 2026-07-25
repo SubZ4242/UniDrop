@@ -408,8 +408,9 @@ sealed class SettingsForm : Form
         Text = "UniDrop";
         Font = Theme.BodyFont;
         BackColor = Theme.Surface;
-        MinimumSize = new Size(680, 430);
-        Size = WinDropSettings.Load().WindowSize;
+        MinimumSize = WinDropSettings.MinimumWindowSize;
+        Size = WinDropSettings.ClampWindowSize(WinDropSettings.Load().WindowSize);
+        StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         ResizeEnd += (_, _) => SaveWindowSize();
@@ -462,7 +463,7 @@ sealed class SettingsForm : Form
             RowCount = 2,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -529,7 +530,7 @@ sealed class SettingsForm : Form
             ColumnCount = 2,
             RowCount = 8,
         };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
@@ -631,7 +632,7 @@ sealed class SettingsForm : Form
             Margin = new Padding(0),
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 122));
         var browse = ModernButton("Browse", (_, _) => BrowseOutputFolder());
         browse.Dock = DockStyle.Fill;
         browse.Margin = new Padding(0, 3, 0, 9);
@@ -660,7 +661,7 @@ sealed class SettingsForm : Form
             Margin = new Padding(0),
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
         var discover = ModernButton("Mac suchen", (_, _) => DiscoverMacGateway());
         discover.Dock = DockStyle.Fill;
         discover.Margin = new Padding(0, 3, 0, 9);
@@ -681,11 +682,15 @@ sealed class SettingsForm : Form
         var button = new Button
         {
             Text = text,
-            AutoSize = true,
+            AutoSize = false,
+            Width = 128,
             Height = 34,
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.Blue,
             ForeColor = Color.White,
+            Font = Theme.ButtonFont,
+            TextAlign = ContentAlignment.MiddleCenter,
+            UseMnemonic = false,
             Margin = new Padding(0, 4, 10, 0),
         };
         button.FlatAppearance.BorderSize = 0;
@@ -767,7 +772,7 @@ sealed class SettingsForm : Form
             return;
         }
 
-        WinDropSettings.Load().WithWindowSize(Size).Save();
+        WinDropSettings.Load().WithWindowSize(WinDropSettings.ClampWindowSize(Size)).Save();
     }
 }
 
@@ -780,6 +785,8 @@ sealed record WinDropSettings(
     Size WindowSize
 )
 {
+    public static readonly Size MinimumWindowSize = new(840, 540);
+
     public static readonly string DirectoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "UniDrop"
@@ -793,7 +800,7 @@ sealed record WinDropSettings(
         var output = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "UniDrop");
         var autoReceive = true;
         var autoOpenFolder = false;
-        var windowSize = new Size(720, 460);
+        var windowSize = MinimumWindowSize;
         if (File.Exists(FilePath))
         {
             foreach (var line in File.ReadAllLines(FilePath))
@@ -821,12 +828,12 @@ sealed record WinDropSettings(
                 else if (line.StartsWith("window_width=", StringComparison.OrdinalIgnoreCase)
                     && int.TryParse(line["window_width=".Length..], out var width))
                 {
-                    windowSize.Width = Math.Max(680, width);
+                    windowSize.Width = Math.Max(MinimumWindowSize.Width, width);
                 }
                 else if (line.StartsWith("window_height=", StringComparison.OrdinalIgnoreCase)
                     && int.TryParse(line["window_height=".Length..], out var height))
                 {
-                    windowSize.Height = Math.Max(430, height);
+                    windowSize.Height = Math.Max(MinimumWindowSize.Height, height);
                 }
             }
         }
@@ -837,10 +844,15 @@ sealed record WinDropSettings(
             listen = DefaultListenUrl();
         }
 
-        return new WinDropSettings(gateway, listen, output, autoReceive, autoOpenFolder, windowSize);
+        return new WinDropSettings(gateway, listen, output, autoReceive, autoOpenFolder, ClampWindowSize(windowSize));
     }
 
-    public WinDropSettings WithWindowSize(Size windowSize) => this with { WindowSize = windowSize };
+    public static Size ClampWindowSize(Size windowSize) => new(
+        Math.Max(MinimumWindowSize.Width, windowSize.Width),
+        Math.Max(MinimumWindowSize.Height, windowSize.Height)
+    );
+
+    public WinDropSettings WithWindowSize(Size windowSize) => this with { WindowSize = ClampWindowSize(windowSize) };
 
     public void Save()
     {
@@ -863,12 +875,14 @@ sealed record WinDropSettings(
 
     public static string? FindLanAddress()
     {
+        var fallback = new List<IPAddress>();
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
         {
+            var description = networkInterface.Description;
+            var name = networkInterface.Name;
             if (networkInterface.OperationalStatus != OperationalStatus.Up
                 || networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback
-                || networkInterface.Description.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)
-                || networkInterface.Description.Contains("Nord", StringComparison.OrdinalIgnoreCase))
+                || IsVirtualOrVpnInterface(name, description))
             {
                 continue;
             }
@@ -879,11 +893,36 @@ sealed record WinDropSettings(
                     && !IPAddress.IsLoopback(address.Address)
                     && IsPrivateAddress(address.Address))
                 {
-                    return address.Address.ToString();
+                    if (networkInterface.NetworkInterfaceType is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet)
+                    {
+                        return address.Address.ToString();
+                    }
+                    fallback.Add(address.Address);
                 }
             }
         }
-        return null;
+        return fallback.Count > 0 ? fallback[0].ToString() : null;
+    }
+
+    private static bool IsVirtualOrVpnInterface(string name, string description)
+    {
+        var value = name + " " + description;
+        string[] blocked = [
+            "Tailscale",
+            "Nord",
+            "VPN",
+            "WireGuard",
+            "OpenVPN",
+            "Hyper-V",
+            "vEthernet",
+            "WSL",
+            "Docker",
+            "VMware",
+            "VirtualBox",
+            "Loopback",
+            "Bluetooth"
+        ];
+        return blocked.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsPrivateAddress(IPAddress address)
@@ -1189,6 +1228,7 @@ static class Theme
 {
     public static readonly Font BodyFont = PreferredFont("Segoe UI Variable Text", 9.6f, FontStyle.Regular);
     public static readonly Font SmallFont = PreferredFont("Segoe UI Variable Text", 8.7f, FontStyle.Regular);
+    public static readonly Font ButtonFont = PreferredFont("Segoe UI Variable Text", 9.0f, FontStyle.Regular);
     public static readonly Font StatusFont = PreferredFont("Segoe UI Variable Text", 11.2f, FontStyle.Bold);
     public static readonly Font SectionFont = PreferredFont("Segoe UI Variable Text", 12.4f, FontStyle.Bold);
     public static readonly Font DisplayFont = PreferredFont("Segoe UI Variable Display", 22.5f, FontStyle.Bold);

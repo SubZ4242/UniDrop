@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin python3
 """Update UniDrop forwarding settings in the local discovery config."""
 
 from __future__ import annotations

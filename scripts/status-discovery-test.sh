@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -22,8 +24,8 @@ SERVER_PID=$(sed -n '1p' "$PID_FILE")
 printf 'Status: running\n'
 ps -p "$SERVER_PID" -o pid=,ppid=,etime=,%cpu=,rss=,command=
 printf 'launchd job:\n'
-launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" | rg 'state =|pid =|runs =|last exit code' || true
-launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" | rg 'keepalive =|KeepAlive|successful exit' || true
+launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" | grep -E 'state =|pid =|runs =|last exit code' || true
+launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" | grep -E 'keepalive =|KeepAlive|successful exit' || true
 if [ -f "$RUNTIME_DIR/state.json" ]; then
     python3 -m json.tool "$RUNTIME_DIR/state.json"
 fi
