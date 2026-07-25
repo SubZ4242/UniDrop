@@ -28,7 +28,7 @@ def quote_toml(value: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--windows-host", required=True)
+    parser.add_argument("--windows-host", default="")
     parser.add_argument("--windows-port", type=int, default=8873)
     parser.add_argument("--gateway-port", type=int)
     parser.add_argument("--display-name")
@@ -41,7 +41,7 @@ def main() -> int:
         raise SystemExit("windows port must be between 1024 and 65535")
     if not 1024 <= gateway_port <= 65535:
         raise SystemExit("gateway port must be between 1024 and 65535")
-    if not re.fullmatch(r"[A-Za-z0-9_.:-]+", args.windows_host):
+    if args.windows_host and not re.fullmatch(r"[A-Za-z0-9_.:-]+", args.windows_host):
         raise SystemExit("windows host contains unsupported characters")
 
     text = args.config.read_text(encoding="utf-8")

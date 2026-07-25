@@ -95,8 +95,6 @@ class DiscoveryConfig:
             raise ValueError("network.port must be between 1024 and 65535")
         if not 1024 <= self.windows_port <= 65535:
             raise ValueError("network.windows_port must be between 1024 and 65535")
-        if self.forwarding_enabled and not self.windows_host:
-            raise ValueError("network.windows_host is required when forwarding.enabled is true")
         if self.health_timeout_seconds < 1 or self.upload_timeout_seconds < 1:
             raise ValueError("forwarding timeouts must be positive")
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.pairing_token_env) is None:
@@ -108,6 +106,13 @@ class DiscoveryConfig:
     def pairing_token(self) -> str | None:
         token = os.environ.get(self.pairing_token_env, "").strip()
         return token or None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReceiverProbe:
+    host: str
+    name: str
+    platform: str = ""
 
 
 def interface_ipv6(interface: str) -> tuple[str, int]:
@@ -166,27 +171,95 @@ def windows_headers(config: DiscoveryConfig) -> dict[str, str]:
     return headers
 
 
-def check_windows_receiver(config: DiscoveryConfig) -> bool:
-    if not config.forwarding_enabled:
-        return False
+def probe_receiver(config: DiscoveryConfig, host: str, timeout: float | None = None) -> ReceiverProbe | None:
+    connection: http.client.HTTPConnection | None = None
     try:
         connection = http.client.HTTPConnection(
-            config.windows_host,
+            host,
             config.windows_port,
-            timeout=config.health_timeout_seconds,
+            timeout=timeout if timeout is not None else config.health_timeout_seconds,
         )
         connection.request("GET", "/health", headers=windows_headers(config))
         response = connection.getresponse()
-        response.read()
-        return 200 <= response.status < 300
-    except OSError as exc:
-        LOGGER.warning("Windows receiver is not reachable: %s", exc)
-        return False
-    finally:
+        body = response.read(4096)
+        if not 200 <= response.status < 300:
+            return None
+        text = body.decode("utf-8", errors="replace")
         try:
-            connection.close()  # type: ignore[possibly-undefined]
-        except Exception:
-            pass
+            parsed = json.loads(text)
+            app = str(parsed.get("app", ""))
+            receiver = str(parsed.get("receiver", ""))
+            platform = str(parsed.get("platform", "")).lower()
+        except json.JSONDecodeError:
+            app = ""
+            receiver = text
+            platform = ""
+        if "UniDrop" not in app and "UniDrop" not in text and "WinDrop" not in text and "AnyDrop" not in text:
+            return None
+        return ReceiverProbe(host=host, name=receiver or "UniDrop Receiver", platform=platform)
+    except OSError:
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def discover_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
+    own_ip = local_lan_ipv4()
+    if own_ip is None:
+        LOGGER.warning("Could not auto-discover receiver because Mac LAN IP is unknown")
+        return None
+    try:
+        network = ipaddress.IPv4Network(f"{own_ip}/24", strict=False)
+    except ValueError:
+        return None
+
+    found: list[ReceiverProbe] = []
+    hosts = [str(host) for host in network.hosts() if str(host) != own_ip]
+
+    def worker(host: str) -> ReceiverProbe | None:
+        return probe_receiver(config, host, timeout=0.45)
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+        futures = [executor.submit(worker, host) for host in hosts]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result is not None:
+                found.append(result)
+
+    found.sort(key=lambda item: (
+        0 if item.platform == "android" else 1 if item.platform == "windows" else 2,
+        tuple(int(part) for part in item.host.split(".")),
+    ))
+    if found:
+        LOGGER.warning(
+            "Auto-discovered receiver %s at %s:%d",
+            found[0].name,
+            found[0].host,
+            config.windows_port,
+        )
+        return found[0]
+    LOGGER.warning("No UniDrop receiver found on local /24 port %d", config.windows_port)
+    return None
+
+
+def resolve_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
+    if not config.forwarding_enabled:
+        return None
+    if config.windows_host:
+        result = probe_receiver(config, config.windows_host)
+        if result is None:
+            LOGGER.warning("Configured receiver is not reachable: %s:%d", config.windows_host, config.windows_port)
+        return result
+    return discover_receiver(config)
+
+
+def check_windows_receiver(config: DiscoveryConfig) -> bool:
+    if not config.forwarding_enabled:
+        return False
+    return resolve_receiver(config) is not None
 
 
 class DiscoveryRequestHandler(BaseHTTPRequestHandler):
@@ -321,7 +394,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
         )
 
         if not check_windows_receiver(self.discovery_config):
-            LOGGER.warning("Rejected /Ask because Windows receiver is unavailable or forwarding is disabled")
+            LOGGER.warning("Rejected /Ask because no receiver is available or forwarding is disabled")
             self._send_bytes(503, b"", "application/octet-stream")
             return
 
@@ -352,7 +425,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             self._send_bytes(408, b"", "application/octet-stream")
             return
         except Exception:
-            LOGGER.exception("Forwarding /Upload to Windows failed")
+            LOGGER.exception("Forwarding /Upload to receiver failed")
             self._send_bytes(502, b"", "application/octet-stream")
             return
         finally:
@@ -361,7 +434,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
         if 200 <= status < 300:
             self._send_bytes(200, b"", "application/octet-stream")
         else:
-            LOGGER.warning("Windows receiver rejected upload with HTTP %d", status)
+            LOGGER.warning("Receiver rejected upload with HTTP %d", status)
             self._send_bytes(502, b"", "application/octet-stream")
 
     def _spool_upload_body(self) -> tuple[Path, int]:
@@ -388,8 +461,11 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
 
     def _forward_upload_to_windows(self, content_type: str, upload_path: Path, content_length: int) -> int:
         config = self.discovery_config
+        receiver = resolve_receiver(config)
+        if receiver is None:
+            raise RuntimeError("No reachable UniDrop receiver")
         connection = http.client.HTTPConnection(
-            config.windows_host,
+            receiver.host,
             config.windows_port,
             timeout=config.upload_timeout_seconds,
         )
@@ -405,8 +481,16 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
                 while chunk := body.read(256 * 1024):
                     connection.send(chunk)
             response = connection.getresponse()
-            response.read()
-            LOGGER.warning("Forwarded /Upload to Windows: %d bytes, HTTP %d", content_length, response.status)
+            response_body = response.read(4096).decode("utf-8", errors="replace")
+            LOGGER.warning(
+                "Forwarded /Upload to %s at %s:%d: %d bytes, HTTP %d%s",
+                receiver.name,
+                receiver.host,
+                config.windows_port,
+                content_length,
+                response.status,
+                f", response={response_body[:500]}" if response_body else "",
+            )
             return response.status
         finally:
             connection.close()
@@ -455,7 +539,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
 class ScopedIPv6HTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET6
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = True
 
     def __init__(
         self,
@@ -534,7 +618,7 @@ class LanStatusRequestHandler(BaseHTTPRequestHandler):
 
 class LanStatusHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = True
 
     def __init__(
         self,

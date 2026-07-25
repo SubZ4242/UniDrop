@@ -17,6 +17,7 @@ from dataclasses import dataclass
 class ProbeResult:
     ip: str
     receiver: str
+    platform: str
 
 
 def local_ip() -> str | None:
@@ -72,14 +73,18 @@ def probe(ip: str, port: int, timeout: float) -> ProbeResult | None:
         if not 200 <= response.status < 300:
             return None
         text = body.decode("utf-8", errors="replace")
-        if "UniDrop" not in text and "AnyDrop" not in text and "WinDrop" not in text:
-            return None
         try:
             parsed = json.loads(text)
+            app = str(parsed.get("app", ""))
             receiver = str(parsed.get("receiver", "UniDrop Receiver"))
+            platform = str(parsed.get("platform", "")).lower()
         except json.JSONDecodeError:
+            app = ""
             receiver = "UniDrop Receiver"
-        return ProbeResult(ip=ip, receiver=receiver)
+            platform = ""
+        if "UniDrop" not in app and "UniDrop" not in text and "AnyDrop" not in text and "WinDrop" not in text:
+            return None
+        return ProbeResult(ip=ip, receiver=receiver, platform=platform)
     except OSError:
         return None
     finally:
@@ -113,7 +118,7 @@ def main() -> int:
                 found.append(result)
 
     found.sort(key=lambda item: (
-        0 if "UniDrop" in item.receiver else 1 if "AnyDrop" in item.receiver else 2,
+        0 if item.platform == "android" else 1 if item.platform == "windows" else 2,
         tuple(int(part) for part in item.ip.split(".")),
     ))
     best = found[0] if found else None
@@ -125,6 +130,7 @@ def main() -> int:
                 "ip": best.ip,
                 "port": args.port,
                 "name": best.receiver,
+                "platform": best.platform,
             },
         }, sort_keys=True))
     else:
@@ -132,8 +138,9 @@ def main() -> int:
         if best is not None:
             print(f"receiver_ip={best.ip}")
             print(f"receiver_name={best.receiver}")
+            print(f"receiver_platform={best.platform}")
             for result in found:
-                print(f"candidate={result.ip} {result.receiver}")
+                print(f"candidate={result.ip} {result.platform} {result.receiver}")
     return 0 if best is not None else 2
 
 

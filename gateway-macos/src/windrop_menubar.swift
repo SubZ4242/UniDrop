@@ -96,7 +96,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         macIpLabel.textColor = .secondaryLabelColor
         macIpLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let hostRow = labeledField(label: "Empfänger-IP", field: hostField)
+        let hostRow = labeledField(label: "Ziel", field: hostField)
         let portRow = labeledField(label: "Port", field: portField)
         let toggle = button("Stoppen", #selector(toggleDiscovery))
         let save = button("Speichern", #selector(saveForwarding))
@@ -332,9 +332,9 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         }
         if host.isEmpty || host.lowercased() == "auto" {
             let detectedReceiver = discoverReceiver(port: port)
-            if let detected = detectedReceiver.receiverIp {
-                host = detected
-                hostField.stringValue = detected
+            if detectedReceiver.receiverIp != nil {
+                host = ""
+                hostField.stringValue = "auto"
                 detectedName = detectedReceiver.receiverName
             } else {
                 statusLabel.stringValue = "Kein Empfänger auf Port \(port) gefunden"
@@ -345,7 +345,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         statusLabel.stringValue = "Speichere Konfiguration..."
         DispatchQueue.global(qos: .utility).async {
             var arguments = [
-                "--windows-host", host,
+                    "--windows-host", host,
                 "--windows-port", port,
                 "--gateway-port", port,
                 "--enabled", "true"
@@ -448,9 +448,9 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         DispatchQueue.global(qos: .utility).async {
             let effectivePort = port.isEmpty ? "8873" : port
             let discovered = self.discoverReceiver(port: effectivePort)
-            if let receiverIp = discovered.receiverIp {
+            if discovered.receiverIp != nil {
                 var arguments = [
-                    "--windows-host", receiverIp,
+                    "--windows-host", "",
                     "--windows-port", effectivePort,
                     "--gateway-port", effectivePort,
                     "--enabled", "true",
@@ -470,8 +470,9 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
                     self.macIpLabel.stringValue = "Mac-IP: nicht gefunden"
                 }
                 if let receiverIp = discovered.receiverIp {
-                    self.hostField.stringValue = receiverIp
-                    self.statusLabel.stringValue = "Empfänger gefunden: \(receiverIp)"
+                    self.hostField.stringValue = "auto"
+                    let receiverText = discovered.receiverName ?? receiverIp
+                    self.statusLabel.stringValue = "Empfänger: \(receiverText)"
                     self.restartDiscoveryAfterConfigChange()
                 }
             }
@@ -492,7 +493,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
 
     private func modelName(for receiverName: String) -> String {
         let lower = receiverName.lowercased()
-        if lower.contains("galaxy") || lower.contains("android") {
+        if lower.contains("galaxy") || lower.contains("android") || lower.contains("s10") {
             return "Android Phone"
         }
         if lower.contains("windows") {
@@ -507,7 +508,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             return
         }
         if let host = match(text, #"(?m)^windows_host\s*=\s*"([^"]*)""#) {
-            hostField.stringValue = host
+            hostField.stringValue = host.isEmpty ? "auto" : host
         }
         if let port = match(text, #"(?m)^windows_port\s*=\s*([0-9]+)"#) {
             portField.stringValue = port

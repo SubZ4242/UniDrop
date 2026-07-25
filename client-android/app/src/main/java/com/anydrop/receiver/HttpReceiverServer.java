@@ -2,6 +2,7 @@ package com.unidrop.receiver;
 
 import android.content.Context;
 import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -98,7 +99,7 @@ public final class HttpReceiverServer {
             }
             if ("GET".equals(request.method) && "/health".equals(request.path)) {
                 byte[] body = (
-                    "{\"status\":\"ok\",\"receiver\":\"" + receiverName() + "\",\"version\":\"0.1.0\",\"outputDirectory\":\"Downloads/UniDrop\"}"
+                    "{\"status\":\"ok\",\"app\":\"UniDrop\",\"platform\":\"android\",\"receiver\":\"" + jsonEscape(receiverName()) + "\",\"version\":\"0.1.0\",\"outputDirectory\":\"Downloads/UniDrop\"}"
                 ).getBytes(StandardCharsets.UTF_8);
                 writeResponse(output, 200, "application/json", body);
                 return;
@@ -135,7 +136,7 @@ public final class HttpReceiverServer {
             writeResponse(output, 200, "application/json", savedJson(files).getBytes(StandardCharsets.UTF_8));
         } catch (Exception exc) {
             Log.e(TAG, "upload rejected", exc);
-            writeResponse(output, 400, "application/json", jsonError("invalid_archive").getBytes(StandardCharsets.UTF_8));
+            writeResponse(output, 400, "application/json", jsonError("invalid_archive", exc.getClass().getSimpleName() + ": " + exc.getMessage()).getBytes(StandardCharsets.UTF_8));
         } finally {
             if (!archive.delete() && archive.exists()) {
                 Log.w(TAG, "could not delete temp archive " + archive);
@@ -242,15 +243,27 @@ public final class HttpReceiverServer {
         return "{\"status\":\"failed\",\"error\":\"" + error + "\"}";
     }
 
+    private String jsonError(String error, String message) {
+        return "{\"status\":\"failed\",\"error\":\"" + jsonEscape(error) + "\",\"message\":\"" + jsonEscape(message == null ? "" : message) + "\"}";
+    }
+
     private String receiverName() {
+        String configuredName = Settings.Global.getString(context.getContentResolver(), "device_name");
+        if (configuredName != null && !configuredName.trim().isEmpty()) {
+            return configuredName.trim();
+        }
         String model = Build.MODEL == null ? "" : Build.MODEL.trim();
         if (model.toUpperCase(Locale.ROOT).startsWith("SM-G97")) {
-            return "UniDrop Galaxy S10";
+            return "Galaxy S10";
         }
         if (model.isEmpty()) {
-            return "UniDrop Android";
+            return "Android";
         }
-        return "UniDrop " + model.replace("\"", "");
+        return model.replace("\"", "");
+    }
+
+    private String jsonEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private String savedJson(List<String> files) {

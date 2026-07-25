@@ -70,22 +70,23 @@ class DiscoveryConfigTests(unittest.TestCase):
                 """
             )
 
-    def test_forwarding_requires_windows_host(self):
-        with self.assertRaisesRegex(ValueError, "windows_host"):
-            self.load_config(
-                """
-                [receiver]
-                display_name = "test"
-                model_name = "test"
-                service_id = "001122334455"
-                bonjour_host = "test"
-                [network]
-                interface = "awdl0"
-                port = 8873
-                [forwarding]
-                enabled = true
-                """
-            )
+    def test_forwarding_allows_auto_receiver_discovery(self):
+        config = self.load_config(
+            """
+            [receiver]
+            display_name = "test"
+            model_name = "test"
+            service_id = "001122334455"
+            bonjour_host = "test"
+            [network]
+            interface = "awdl0"
+            port = 8873
+            [forwarding]
+            enabled = true
+            """
+        )
+        self.assertEqual(config.windows_host, "")
+        self.assertTrue(config.forwarding_enabled)
 
 
 if __name__ == "__main__":
