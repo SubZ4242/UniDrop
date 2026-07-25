@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 import tomllib
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ SUPPORTED_UPLOAD_CONTENT_TYPES = {
     "application/x-cpio",
     "application/x-dvzip",
 }
+MAX_DVZIP_CHUNK_BYTES = 256 * 1024 * 1024
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,6 +160,83 @@ def build_ask_response(config: DiscoveryConfig) -> bytes:
         fmt=plistlib.FMT_BINARY,
         sort_keys=True,
     )
+
+
+def looks_like_cpio_or_gzip(path: Path) -> bool:
+    with path.open("rb") as handle:
+        header = handle.read(6)
+    return header.startswith(b"\x1f\x8b") or header in {b"070701", b"070702", b"070707"}
+
+
+def parse_dvzip_chunk_length(length_bytes: bytes) -> int:
+    if len(length_bytes) != 4:
+        raise EOFError("Incomplete DVZip chunk length")
+    big_endian = int.from_bytes(length_bytes, "big", signed=True)
+    if 0 <= big_endian <= MAX_DVZIP_CHUNK_BYTES:
+        return big_endian
+    flagged_big_endian = big_endian & 0x7FFFFFFF
+    if 0 < flagged_big_endian <= MAX_DVZIP_CHUNK_BYTES:
+        return flagged_big_endian
+    little_endian = int.from_bytes(length_bytes, "little", signed=True)
+    if 0 <= little_endian <= MAX_DVZIP_CHUNK_BYTES:
+        return little_endian
+    raise ValueError(f"Invalid DVZip chunk length {big_endian}")
+
+
+def dvzip_diagnostics(path: Path) -> dict[str, Any]:
+    data = path.read_bytes()[:128]
+    candidates: list[dict[str, Any]] = []
+    for offset in range(0, min(32, max(0, len(data) - 3))):
+        chunk = data[offset : offset + 4]
+        big_unsigned = int.from_bytes(chunk, "big", signed=False)
+        big_signed = int.from_bytes(chunk, "big", signed=True)
+        little_signed = int.from_bytes(chunk, "little", signed=True)
+        flagged_big = big_signed & 0x7FFFFFFF
+        plausible = [
+            value
+            for value in (big_signed, flagged_big, little_signed)
+            if 0 < value <= MAX_DVZIP_CHUNK_BYTES
+        ]
+        if plausible:
+            candidates.append(
+                {
+                    "offset": offset,
+                    "hex": chunk.hex(),
+                    "be_unsigned": big_unsigned,
+                    "be_signed": big_signed,
+                    "be_flagged": flagged_big,
+                    "le_signed": little_signed,
+                    "plausible": plausible,
+                }
+            )
+    return {
+        "size": path.stat().st_size,
+        "first_64_hex": data[:64].hex(),
+        "ascii_preview": "".join(chr(byte) if 32 <= byte <= 126 else "." for byte in data[:64]),
+        "length_candidates": candidates[:12],
+    }
+
+
+def expand_dvzip_to_cpio(input_path: Path, output_path: Path) -> int:
+    total = 0
+    with input_path.open("rb") as source, output_path.open("wb") as output:
+        while True:
+            length_bytes = source.read(4)
+            if not length_bytes:
+                break
+            compressed_length = parse_dvzip_chunk_length(length_bytes)
+            if compressed_length == 0:
+                break
+            compressed = source.read(compressed_length)
+            if len(compressed) != compressed_length:
+                raise EOFError("DVZip chunk ended before advertised length")
+            try:
+                decompressed = zlib.decompress(compressed)
+            except zlib.error:
+                decompressed = zlib.decompress(compressed, -zlib.MAX_WBITS)
+            output.write(decompressed)
+            total += len(decompressed)
+    return total
 
 
 def windows_headers(config: DiscoveryConfig) -> dict[str, str]:
@@ -444,9 +523,15 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             return
 
         upload_path: Path | None = None
+        forward_path: Path | None = None
         try:
             upload_path, total = self._spool_upload_body()
-            status = self._forward_upload_to_windows(content_type, upload_path, total)
+            forward_content_type, forward_path, forward_total = self._prepare_upload_for_forwarding(
+                content_type,
+                upload_path,
+                total,
+            )
+            status = self._forward_upload_to_windows(forward_content_type, forward_path, forward_total)
         except TimeoutError:
             LOGGER.warning("Upload from %s timed out before the archive was complete", self.client_address[0])
             self._send_bytes(408, b"", "application/octet-stream")
@@ -456,6 +541,8 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             self._send_bytes(502, b"", "application/octet-stream")
             return
         finally:
+            if forward_path is not None and upload_path is not None and forward_path != upload_path:
+                forward_path.unlink(missing_ok=True)
             if upload_path is not None:
                 upload_path.unlink(missing_ok=True)
         if 200 <= status < 300:
@@ -557,6 +644,25 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             remaining -= len(chunk)
             total += len(chunk)
         return total
+
+    def _prepare_upload_for_forwarding(self, content_type: str, upload_path: Path, total: int) -> tuple[str, Path, int]:
+        if content_type != "application/x-dvzip":
+            return content_type, upload_path, total
+        if looks_like_cpio_or_gzip(upload_path):
+            LOGGER.warning("Received /Upload as DVZip but payload already looks like CPIO/GZip; forwarding as CPIO")
+            return "application/x-cpio", upload_path, total
+
+        descriptor, raw_path = tempfile.mkstemp(prefix="windrop-dvzip-expanded-", suffix=".cpio")
+        cpio_path = Path(raw_path)
+        os.close(descriptor)
+        try:
+            cpio_total = expand_dvzip_to_cpio(upload_path, cpio_path)
+        except Exception:
+            LOGGER.warning("DVZip diagnostics after conversion failure: %s", json.dumps(dvzip_diagnostics(upload_path)))
+            cpio_path.unlink(missing_ok=True)
+            raise
+        LOGGER.warning("Expanded DVZip upload before forwarding: %d bytes -> %d bytes CPIO", total, cpio_total)
+        return "application/x-cpio", cpio_path, cpio_total
 
     def log_message(self, format_string: str, *args: object) -> None:
         if LOGGER.isEnabledFor(logging.DEBUG):

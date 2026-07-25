@@ -4,6 +4,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import zlib
 from pathlib import Path
 
 
@@ -87,6 +88,22 @@ class DiscoveryConfigTests(unittest.TestCase):
         )
         self.assertEqual(config.windows_host, "")
         self.assertTrue(config.forwarding_enabled)
+
+    def test_parse_dvzip_flagged_big_endian_length(self):
+        self.assertEqual(MODULE.parse_dvzip_chunk_length(bytes.fromhex("80020000")), 131072)
+
+    def test_expand_dvzip_to_cpio(self):
+        cpio = b"070701" + b"0" * 128 + b"payload"
+        compressed = zlib.compress(cpio)
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.dvzip"
+            output_path = Path(directory) / "output.cpio"
+            input_path.write_bytes(len(compressed).to_bytes(4, "big") + compressed)
+
+            total = MODULE.expand_dvzip_to_cpio(input_path, output_path)
+
+            self.assertEqual(total, len(cpio))
+            self.assertEqual(output_path.read_bytes(), cpio)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -65,7 +67,9 @@ public final class HttpReceiverServer {
     }
 
     private void acceptLoop() {
-        try (ServerSocket socket = new ServerSocket(port)) {
+        try (ServerSocket socket = new ServerSocket()) {
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port));
             serverSocket = socket;
             listener.onStatus(new ReceiverService.ServerStatus(true, "läuft auf Port " + port), 0);
             while (running) {
