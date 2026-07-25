@@ -3,9 +3,9 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-RUNTIME_DIR="$PROJECT_ROOT/.runtime/discovery-test"
+RUNTIME_DIR="${UNIDROP_RUNTIME_DIR:-$PROJECT_ROOT/.runtime/discovery-test}"
 PID_FILE="$RUNTIME_DIR/server.pid"
-LAUNCHD_LABEL="com.windrop.gateway.discovery-test"
+LAUNCHD_LABEL="${UNIDROP_LAUNCHD_LABEL:-com.windrop.gateway.discovery-test}"
 
 if ! launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
     printf 'Status: stopped\n'

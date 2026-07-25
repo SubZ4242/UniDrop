@@ -763,6 +763,12 @@ static class DvZipExtractor
             return bigEndian;
         }
 
+        var flaggedBigEndian = bigEndian & 0x7fffffff;
+        if (flaggedBigEndian > 0 && flaggedBigEndian <= 256 * 1024 * 1024)
+        {
+            return flaggedBigEndian;
+        }
+
         var littleEndian =
             lengthBytes[0]
             | lengthBytes[1] << 8

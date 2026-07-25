@@ -3,16 +3,18 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-RUNTIME_DIR="$PROJECT_ROOT/.runtime/discovery-test"
+RUNTIME_DIR="${UNIDROP_RUNTIME_DIR:-$PROJECT_ROOT/.runtime/discovery-test}"
 PID_FILE="$RUNTIME_DIR/server.pid"
-SERVICE_PLIST="$RUNTIME_DIR/com.windrop.gateway.discovery-test.plist"
-CONFIG_FILE="$PROJECT_ROOT/gateway-macos/config/discovery-test.toml"
+LAUNCHD_LABEL="${UNIDROP_LAUNCHD_LABEL:-com.windrop.gateway.discovery-test}"
+SERVICE_PLIST="$RUNTIME_DIR/$LAUNCHD_LABEL.plist"
+CONFIG_FILE="${UNIDROP_CONFIG_FILE:-$PROJECT_ROOT/gateway-macos/config/discovery-test.toml}"
 SERVER_FILE="$PROJECT_ROOT/gateway-macos/src/discovery_test.py"
-LAUNCHD_LABEL="com.windrop.gateway.discovery-test"
+STATUS_SCRIPT="${UNIDROP_STATUS_SCRIPT:-$SCRIPT_DIR/status-discovery-test.sh}"
+SERVICE_NAME="${UNIDROP_SERVICE_NAME:-UniDrop discovery test}"
 
 if launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
-    printf 'UniDrop discovery test launchd job is already loaded.\n'
-    "$SCRIPT_DIR/status-discovery-test.sh"
+    printf '%s launchd job is already loaded.\n' "$SERVICE_NAME"
+    "$STATUS_SCRIPT"
     exit 0
 fi
 
@@ -61,21 +63,21 @@ launchctl bootstrap "gui/$(id -u)" "$SERVICE_PLIST"
 ATTEMPT=0
 while [ "$ATTEMPT" -lt 40 ]; do
     if ! launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
-        printf 'UniDrop discovery test failed to start.\n' >&2
+        printf '%s failed to start.\n' "$SERVICE_NAME" >&2
         tail -n 40 "$RUNTIME_DIR/server.log" >&2
         exit 1
     fi
     if [ -f "$RUNTIME_DIR/state.json" ]; then
         SERVER_PID=$(sed -n '1p' "$PID_FILE")
-        printf 'UniDrop discovery test started (PID %s).\n' "$SERVER_PID"
-        "$SCRIPT_DIR/status-discovery-test.sh"
+        printf '%s started (PID %s).\n' "$SERVICE_NAME" "$SERVER_PID"
+        "$STATUS_SCRIPT"
         exit 0
     fi
     ATTEMPT=$((ATTEMPT + 1))
     sleep 0.25
 done
 
-printf 'UniDrop discovery test did not become ready in time.\n' >&2
+printf '%s did not become ready in time.\n' "$SERVICE_NAME" >&2
 tail -n 40 "$RUNTIME_DIR/server.log" >&2
 launchctl remove "$LAUNCHD_LABEL" 2>/dev/null || true
 exit 1

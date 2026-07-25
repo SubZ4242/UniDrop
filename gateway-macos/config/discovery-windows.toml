@@ -1,0 +1,20 @@
+[receiver]
+display_name = "Windows-PC"
+model_name = "Windows PC"
+service_id = "b63a12e09f4d"
+bonjour_host = "unidrop-windows"
+
+[network]
+interface = "awdl0"
+port = 8874
+windows_host = ""
+windows_port = 8873
+
+[forwarding]
+enabled = false
+pairing_token_env = "WINDROP_PAIRING_TOKEN"
+health_timeout_seconds = 2
+upload_timeout_seconds = 600
+
+[logging]
+level = "warn"
