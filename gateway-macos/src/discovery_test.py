@@ -477,6 +477,79 @@ class ScopedIPv6HTTPServer(ThreadingHTTPServer):
         self.server_activate()
 
 
+class LanStatusRequestHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "UniDrop-LAN/0.1"
+    sys_version = ""
+
+    @property
+    def discovery_config(self) -> DiscoveryConfig:
+        return self.server.discovery_config  # type: ignore[attr-defined]
+
+    @property
+    def lan_address(self) -> str:
+        return self.server.lan_address  # type: ignore[attr-defined]
+
+    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+        self.close_connection = True
+
+    def do_HEAD(self) -> None:
+        self._send_json(200, {})
+
+    def do_GET(self) -> None:
+        if self.path not in {"/", "/health", "/gateway"}:
+            self._send_json(404, {"status": "not_found"})
+            return
+        config = self.discovery_config
+        self._send_json(
+            200,
+            {
+                "status": "ok",
+                "app": "UniDrop",
+                "role": "mac-gateway",
+                "name": config.display_name,
+                "version": "0.1.0",
+                "gatewayHost": self.lan_address,
+                "gatewayPort": config.port,
+                "receiverPort": config.windows_port,
+                "airdropPort": config.port,
+            },
+        )
+
+    def do_POST(self) -> None:
+        self._send_json(405, {"status": "method_not_allowed"})
+
+    def log_message(self, format_string: str, *args: object) -> None:
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug("lan %s - %s", self.client_address[0], format_string % args)
+
+
+class LanStatusHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = False
+
+    def __init__(
+        self,
+        address: str,
+        port: int,
+        handler: type[BaseHTTPRequestHandler],
+        discovery_config: DiscoveryConfig,
+    ) -> None:
+        super().__init__((address, port), handler, bind_and_activate=False)
+        self.discovery_config = discovery_config
+        self.lan_address = address
+        self.server_bind()
+        self.server_activate()
+
+
 def ensure_certificate(runtime_dir: Path, common_name: str) -> tuple[Path, Path]:
     key_path = runtime_dir / "tls-key.pem"
     certificate_path = runtime_dir / "tls-certificate.pem"
@@ -600,6 +673,7 @@ def write_state(
     interface_index: int,
     server_pid: int,
     bonjour_pid: int,
+    lan_ipv4: str | None = None,
 ) -> None:
     state = {
         "server_pid": server_pid,
@@ -613,6 +687,8 @@ def write_state(
         "interface_index": interface_index,
         "ipv6_address": f"{ipv6_address}%{config.interface}",
         "port": config.port,
+        "lan_ipv4": lan_ipv4,
+        "lan_gateway_url": f"http://{lan_ipv4}:{config.port}/gateway" if lan_ipv4 else None,
         "txt": {"flags": "136"},
         "transport": "HTTPS/TLS (discovery only)",
     }
@@ -622,6 +698,35 @@ def write_state(
     pid_path = runtime_dir / "server.pid"
     pid_path.write_text(f"{server_pid}\n", encoding="ascii")
     pid_path.chmod(0o600)
+
+
+def local_lan_ipv4() -> str | None:
+    try:
+        completed = subprocess.run(
+            ["/sbin/ifconfig"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    current_interface = ""
+    for raw_line in completed.stdout.splitlines():
+        if raw_line and not raw_line.startswith(("\t", " ")):
+            current_interface = raw_line.split(":", 1)[0]
+            continue
+        if current_interface.startswith(("lo", "awdl", "llw", "utun", "bridge")):
+            continue
+        fields = raw_line.strip().split()
+        if len(fields) >= 2 and fields[0] == "inet":
+            try:
+                address = ipaddress.IPv4Address(fields[1])
+            except ipaddress.AddressValueError:
+                continue
+            if address.is_private and not address.is_loopback and not address.is_link_local:
+                return str(address)
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -685,7 +790,37 @@ def run() -> int:
         thread.start()
         return https_server, thread
 
+    def start_lan_status_server() -> tuple[LanStatusHTTPServer, threading.Thread, str] | None:
+        lan_ipv4 = local_lan_ipv4()
+        if lan_ipv4 is None:
+            LOGGER.warning("No private LAN IPv4 address found; gateway auto-discovery endpoint disabled")
+            return None
+        try:
+            lan_server = LanStatusHTTPServer(
+                lan_ipv4,
+                config.port,
+                LanStatusRequestHandler,
+                config,
+            )
+        except OSError as exc:
+            LOGGER.warning(
+                "Could not bind LAN gateway auto-discovery endpoint on %s:%d: %s",
+                lan_ipv4,
+                config.port,
+                exc,
+            )
+            return None
+        thread = threading.Thread(
+            target=lan_server.serve_forever,
+            name="lan-status-server",
+            daemon=True,
+        )
+        thread.start()
+        LOGGER.warning("LAN gateway auto-discovery endpoint ready at http://%s:%d/gateway", lan_ipv4, config.port)
+        return lan_server, thread, lan_ipv4
+
     server, server_thread = start_https_server(ipv6_address, interface_index)
+    lan_status = start_lan_status_server()
 
     registration = BonjourRegistration(config, ipv6_address, args.runtime_dir)
     registration.start()
@@ -697,6 +832,7 @@ def run() -> int:
         interface_index,
         os.getpid(),
         registration.process.pid,
+        lan_status[2] if lan_status else None,
     )
 
     stop_event = threading.Event()
@@ -779,12 +915,18 @@ def run() -> int:
                     interface_index,
                     os.getpid(),
                     registration.process.pid,
+                    lan_status[2] if lan_status else None,
                 )
     finally:
         route_socket.close()
+        if lan_status is not None:
+            lan_status[0].shutdown()
+            lan_status[0].server_close()
         server.shutdown()
         server.server_close()
         registration.stop()
+        if lan_status is not None:
+            lan_status[1].join(timeout=3)
         server_thread.join(timeout=3)
     return 0
 

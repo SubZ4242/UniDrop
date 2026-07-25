@@ -21,6 +21,8 @@ public final class ReceiverService extends Service {
     public static final String KEY_LAST_STATUS = "last_status";
     public static final String KEY_LAST_FILE_COUNT = "last_file_count";
     public static final String KEY_OUTPUT_TREE_URI = "output_tree_uri";
+    public static final String KEY_GATEWAY_HOST = "gateway_host";
+    public static final String KEY_GATEWAY_PORT = "gateway_port";
     private static final String CHANNEL_ID = "unidrop_receiver";
     private static final int NOTIFICATION_ID = 4242;
 

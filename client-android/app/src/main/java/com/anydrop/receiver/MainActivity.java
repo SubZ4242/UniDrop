@@ -22,14 +22,22 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.net.Inet4Address;
+import java.net.HttpURLConnection;
 import java.net.NetworkInterface;
+import java.net.URL;
 import java.util.Collections;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private TextView statusView;
     private TextView urlView;
     private TextView folderView;
+    private TextView gatewayView;
     private EditText portField;
+    private EditText gatewayPortField;
     private CheckBox autostartCheck;
     private SharedPreferences prefs;
 
@@ -80,8 +88,33 @@ public final class MainActivity extends Activity {
         urlView.setPadding(0, dp(18), 0, dp(12));
         root.addView(urlView);
 
+        gatewayView = new TextView(this);
+        gatewayView.setTextSize(15);
+        gatewayView.setTextColor(Color.rgb(30, 30, 34));
+        gatewayView.setPadding(0, dp(6), 0, dp(10));
+        root.addView(gatewayView);
+
+        TextView gatewayPortLabel = new TextView(this);
+        gatewayPortLabel.setText("Mac-Gateway-Port");
+        gatewayPortLabel.setTextColor(Color.rgb(70, 70, 78));
+        root.addView(gatewayPortLabel);
+
+        gatewayPortField = new EditText(this);
+        gatewayPortField.setSingleLine(true);
+        gatewayPortField.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        gatewayPortField.setText(String.valueOf(prefs.getInt(ReceiverService.KEY_GATEWAY_PORT, 8872)));
+        root.addView(gatewayPortField);
+
+        Button discoverGateway = new Button(this);
+        discoverGateway.setText("Mac suchen");
+        discoverGateway.setOnClickListener(v -> discoverMacGateway());
+        root.addView(discoverGateway, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(52)
+        ));
+
         TextView portLabel = new TextView(this);
-        portLabel.setText("Port");
+        portLabel.setText("Empfänger-Port");
         portLabel.setTextColor(Color.rgb(70, 70, 78));
         root.addView(portLabel);
 
@@ -180,19 +213,57 @@ public final class MainActivity extends Activity {
         return 8873;
     }
 
+    private int parseGatewayPort() {
+        try {
+            int port = Integer.parseInt(gatewayPortField.getText().toString().trim());
+            if (port >= 1024 && port <= 65535) {
+                return port;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        gatewayPortField.setText("8872");
+        return 8872;
+    }
+
     private void refreshUi() {
         boolean running = prefs.getBoolean(ReceiverService.KEY_RUNNING, false);
         int port = prefs.getInt(ReceiverService.KEY_PORT, 8873);
         String last = prefs.getString(ReceiverService.KEY_LAST_STATUS, "");
         String ip = localIpv4();
+        String gatewayHost = prefs.getString(ReceiverService.KEY_GATEWAY_HOST, "");
+        int gatewayPort = prefs.getInt(ReceiverService.KEY_GATEWAY_PORT, 8872);
         statusView.setText(running ? "Status: running" : "Status: stopped" + (last.isEmpty() ? "" : " · " + last));
         urlView.setText(ip == null
             ? "Telefon-WLAN-IP nicht gefunden. WLAN prüfen."
             : "Empfänger-URL: http://" + ip + ":" + port);
+        gatewayView.setText(gatewayHost == null || gatewayHost.isEmpty()
+            ? "Mac-Gateway: nicht gesucht"
+            : "Mac-Gateway: http://" + gatewayHost + ":" + gatewayPort + "/gateway");
         String tree = prefs.getString(ReceiverService.KEY_OUTPUT_TREE_URI, "");
         folderView.setText(tree == null || tree.isEmpty()
             ? "Zielordner: Downloads/UniDrop"
             : "Zielordner: ausgewählter Android-Ordner");
+    }
+
+    private void discoverMacGateway() {
+        int gatewayPort = parseGatewayPort();
+        prefs.edit().putInt(ReceiverService.KEY_GATEWAY_PORT, gatewayPort).apply();
+        gatewayView.setText("Mac-Gateway: suche...");
+        new Thread(() -> {
+            String host = findGatewayHost(gatewayPort);
+            runOnUiThread(() -> {
+                if (host == null) {
+                    prefs.edit().remove(ReceiverService.KEY_GATEWAY_HOST).apply();
+                    gatewayView.setText("Mac-Gateway: nicht gefunden");
+                } else {
+                    prefs.edit()
+                        .putString(ReceiverService.KEY_GATEWAY_HOST, host)
+                        .putInt(ReceiverService.KEY_GATEWAY_PORT, gatewayPort)
+                        .apply();
+                    refreshUi();
+                }
+            });
+        }, "unidrop-gateway-scan").start();
     }
 
     private void chooseOutputFolder() {
@@ -238,6 +309,71 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private String findGatewayHost(int port) {
+        String ownIp = localIpv4();
+        if (ownIp == null) {
+            return null;
+        }
+        int lastDot = ownIp.lastIndexOf('.');
+        if (lastDot <= 0) {
+            return null;
+        }
+        String prefix = ownIp.substring(0, lastDot + 1);
+        ExecutorService executor = Executors.newFixedThreadPool(32);
+        CompletionService<String> completion = new ExecutorCompletionService<>(executor);
+        int submitted = 0;
+        for (int i = 1; i <= 254; i++) {
+            String host = prefix + i;
+            if (host.equals(ownIp)) {
+                continue;
+            }
+            completion.submit(() -> isUniDropGateway(host, port) ? host : "");
+            submitted++;
+        }
+        try {
+            for (int i = 0; i < submitted; i++) {
+                String host = completion.take().get();
+                if (!host.isEmpty()) {
+                    executor.shutdownNow();
+                    return host;
+                }
+            }
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private boolean isUniDropGateway(String host, int port) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL("http://" + host + ":" + port + "/gateway");
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(300);
+            connection.setReadTimeout(300);
+            connection.setRequestMethod("GET");
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                return false;
+            }
+            byte[] buffer = new byte[2048];
+            int read = connection.getInputStream().read(buffer);
+            if (read <= 0) {
+                return false;
+            }
+            String body = new String(buffer, 0, read, java.nio.charset.StandardCharsets.UTF_8);
+            return body.contains("\"app\":\"UniDrop\"") && body.contains("\"role\":\"mac-gateway\"");
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
     private void openBatterySettings() {

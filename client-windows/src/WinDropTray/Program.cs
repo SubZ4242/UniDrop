@@ -344,6 +344,7 @@ sealed class SettingsForm : Form
 {
     private readonly WinDropTrayContext context;
     private readonly RoundButton receiveButton = new();
+    private readonly TextBox gatewayUrl = new();
     private readonly TextBox listenUrl = new();
     private readonly TextBox outputDirectory = new();
     private readonly CheckBox autostart = new() { Text = "Mit Windows starten", AutoSize = true };
@@ -378,6 +379,7 @@ sealed class SettingsForm : Form
     public void LoadSettings()
     {
         var settings = WinDropSettings.Load();
+        gatewayUrl.Text = settings.GatewayUrl;
         listenUrl.Text = settings.ListenUrl;
         outputDirectory.Text = settings.OutputDirectory;
         autoReceive.Checked = settings.AutoReceive;
@@ -470,11 +472,12 @@ sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 8,
         };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -491,16 +494,17 @@ sealed class SettingsForm : Form
         }, 0, 0);
         grid.SetColumnSpan(grid.Controls[^1], 2);
 
-        AddField(grid, 1, "Listen URL", listenUrl);
-        AddFolderField(grid, 2, "Zielordner", outputDirectory);
-        grid.Controls.Add(autostart, 1, 3);
-        grid.Controls.Add(autoReceive, 1, 4);
-        grid.Controls.Add(autoOpenFolder, 1, 5);
+        AddGatewayField(grid, 1, "Mac Gateway", gatewayUrl);
+        AddField(grid, 2, "Listen URL", listenUrl);
+        AddFolderField(grid, 3, "Zielordner", outputDirectory);
+        grid.Controls.Add(autostart, 1, 4);
+        grid.Controls.Add(autoReceive, 1, 5);
+        grid.Controls.Add(autoOpenFolder, 1, 6);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
         buttons.Controls.Add(ModernButton("Speichern", (_, _) => Save()));
         buttons.Controls.Add(ModernButton("Ordner oeffnen", (_, _) => OpenOutputFolder()));
-        grid.Controls.Add(buttons, 1, 6);
+        grid.Controls.Add(buttons, 1, 7);
         return grid;
     }
 
@@ -588,6 +592,35 @@ sealed class SettingsForm : Form
         grid.Controls.Add(panel, 1, row);
     }
 
+    private void AddGatewayField(TableLayoutPanel grid, int row, string labelText, TextBox textBox)
+    {
+        textBox.Dock = DockStyle.Fill;
+        textBox.BorderStyle = BorderStyle.FixedSingle;
+        textBox.Margin = new Padding(0, 3, 8, 9);
+        textBox.PlaceholderText = "auto";
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            Margin = new Padding(0),
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+        var discover = ModernButton("Mac suchen", (_, _) => DiscoverMacGateway());
+        discover.Dock = DockStyle.Fill;
+        discover.Margin = new Padding(0, 3, 0, 9);
+        panel.Controls.Add(textBox, 0, 0);
+        panel.Controls.Add(discover, 1, 0);
+        grid.Controls.Add(new Label
+        {
+            Text = labelText,
+            AutoSize = true,
+            ForeColor = Theme.Muted,
+            Margin = new Padding(0, 7, 0, 0),
+        }, 0, row);
+        grid.Controls.Add(panel, 1, row);
+    }
+
     private static Button ModernButton(string text, EventHandler handler)
     {
         var button = new Button
@@ -608,6 +641,7 @@ sealed class SettingsForm : Form
     private void Save(bool applyAutoReceive = true)
     {
         var settings = new WinDropSettings(
+            gatewayUrl.Text.Trim(),
             listenUrl.Text.Trim(),
             outputDirectory.Text.Trim(),
             autoReceive.Checked,
@@ -653,6 +687,20 @@ sealed class SettingsForm : Form
         }
     }
 
+    private async void DiscoverMacGateway()
+    {
+        gatewayUrl.Text = "suche...";
+        var discovered = await Task.Run(() => MacGatewayDiscovery.Find(gatewayUrl.Text.Trim()));
+        if (discovered is null)
+        {
+            gatewayUrl.Text = "";
+            MessageBox.Show(this, "Kein UniDrop-Mac-Gateway im lokalen Netz gefunden.", "UniDrop", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        gatewayUrl.Text = discovered;
+        Save(applyAutoReceive: false);
+    }
+
     private void SaveWindowSize()
     {
         if (WindowState != FormWindowState.Normal)
@@ -665,6 +713,7 @@ sealed class SettingsForm : Form
 }
 
 sealed record WinDropSettings(
+    string GatewayUrl,
     string ListenUrl,
     string OutputDirectory,
     bool AutoReceive,
@@ -681,6 +730,7 @@ sealed record WinDropSettings(
     public static WinDropSettings Load()
     {
         var listen = DefaultListenUrl();
+        var gateway = "";
         var output = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "UniDrop");
         var autoReceive = true;
         var autoOpenFolder = false;
@@ -692,6 +742,10 @@ sealed record WinDropSettings(
                 if (line.StartsWith("listen=", StringComparison.OrdinalIgnoreCase))
                 {
                     listen = line["listen=".Length..];
+                }
+                else if (line.StartsWith("gateway=", StringComparison.OrdinalIgnoreCase))
+                {
+                    gateway = line["gateway=".Length..];
                 }
                 else if (line.StartsWith("output=", StringComparison.OrdinalIgnoreCase))
                 {
@@ -724,7 +778,7 @@ sealed record WinDropSettings(
             listen = DefaultListenUrl();
         }
 
-        return new WinDropSettings(listen, output, autoReceive, autoOpenFolder, windowSize);
+        return new WinDropSettings(gateway, listen, output, autoReceive, autoOpenFolder, windowSize);
     }
 
     public WinDropSettings WithWindowSize(Size windowSize) => this with { WindowSize = windowSize };
@@ -733,6 +787,7 @@ sealed record WinDropSettings(
     {
         Directory.CreateDirectory(DirectoryPath);
         File.WriteAllLines(FilePath, [
+            "gateway=" + GatewayUrl,
             "listen=" + ListenUrl,
             "output=" + OutputDirectory,
             "auto_receive=" + AutoReceive,
@@ -747,7 +802,7 @@ sealed record WinDropSettings(
         return $"http://{FindLanAddress() ?? "0.0.0.0"}:8873";
     }
 
-    private static string? FindLanAddress()
+    public static string? FindLanAddress()
     {
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
         {
@@ -778,6 +833,79 @@ sealed record WinDropSettings(
         return bytes[0] == 10
             || bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31
             || bytes[0] == 192 && bytes[1] == 168;
+    }
+}
+
+static class MacGatewayDiscovery
+{
+    public static string? Find(string hint)
+    {
+        var ownIp = WinDropSettings.FindLanAddress();
+        if (string.IsNullOrWhiteSpace(ownIp))
+        {
+            return null;
+        }
+        var lastDot = ownIp.LastIndexOf('.');
+        if (lastDot <= 0)
+        {
+            return null;
+        }
+        var prefix = ownIp[..(lastDot + 1)];
+        var port = ExtractPort(hint);
+        string? found = null;
+        object gate = new();
+
+        Parallel.ForEach(
+            Enumerable.Range(1, 254),
+            new ParallelOptions { MaxDegreeOfParallelism = 48 },
+            (host, state) =>
+            {
+                if (Volatile.Read(ref found) is not null)
+                {
+                    state.Stop();
+                    return;
+                }
+                var ip = prefix + host;
+                if (ip == ownIp)
+                {
+                    return;
+                }
+                if (!IsUniDropGateway(ip, port))
+                {
+                    return;
+                }
+                lock (gate)
+                {
+                    found ??= $"http://{ip}:{port}/gateway";
+                }
+                state.Stop();
+            }
+        );
+        return found;
+    }
+
+    private static int ExtractPort(string value)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Port > 0)
+        {
+            return uri.Port;
+        }
+        return 8872;
+    }
+
+    private static bool IsUniDropGateway(string ip, int port)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(450) };
+            var body = client.GetStringAsync($"http://{ip}:{port}/gateway").GetAwaiter().GetResult();
+            return body.Contains("\"app\":\"UniDrop\"", StringComparison.OrdinalIgnoreCase)
+                && body.Contains("\"role\":\"mac-gateway\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 
