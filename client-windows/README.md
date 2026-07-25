@@ -7,11 +7,12 @@ Use the tray app for normal operation:
 
 ```powershell
 .\scripts\publish-windows.ps1
-.\dist\windows\tray\WinDropTray.exe
+.\client-windows\WinDropTray.exe
 ```
 
 `WinDropReceiver.exe` is the background receiver service. The tray app starts it
-automatically when Auto-Empfang is enabled.
+automatically when Auto-Empfang is enabled. Both EXEs are published into
+`client-windows/` for quick manual testing from GitHub.
 
 ## Tray App
 

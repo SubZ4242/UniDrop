@@ -14,6 +14,8 @@ client-windows/*.deps.json
 client-windows/*.runtimeconfig.json
 client-windows/*.staticwebassets.endpoints.json
 client-windows/web.config
+!client-windows/WinDropTray.exe
+!client-windows/WinDropReceiver.exe
 client-android/build/
 client-android/dist/
 client-android/.debug/

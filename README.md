@@ -100,7 +100,7 @@ Build the Windows tray app and bundled receiver:
 
 ```powershell
 .\scripts\publish-windows.ps1
-.\dist\windows\tray\WinDropTray.exe
+.\client-windows\WinDropTray.exe
 ```
 
 The Windows tray app can configure:
@@ -114,6 +114,8 @@ The Windows tray app can configure:
 
 The current Windows project still keeps some internal `WinDrop*` executable and
 class names for compatibility with the existing prototype.
+The repository includes prebuilt `client-windows/WinDropTray.exe` and
+`client-windows/WinDropReceiver.exe` for quick manual testing.
 
 ## 🚧 Status
 

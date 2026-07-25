@@ -387,6 +387,13 @@ sealed class SettingsForm : Form
             eventArgs.Cancel = true;
             Hide();
         };
+        Shown += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(WinDropSettings.Load().GatewayUrl))
+            {
+                DiscoverMacGateway(showMessage: false);
+            }
+        };
 
         Controls.Add(BuildLayout());
         LoadSettings();
@@ -403,10 +410,6 @@ sealed class SettingsForm : Form
         autostart.Checked = context.IsAutostartEnabled();
         endpoint.Text = settings.ListenUrl;
         SetStatus(context.IsReceiving);
-        if (string.IsNullOrWhiteSpace(settings.GatewayUrl))
-        {
-            BeginInvoke(new Action(() => DiscoverMacGateway(showMessage: false)));
-        }
     }
 
     public void SetStatus(bool receiving)
