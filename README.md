@@ -1,10 +1,13 @@
 # 💧 UniDrop
 
-UniDrop is an experimental AirDrop gateway prototype.
+UniDrop is an experimental AirDrop-style gateway for receiving files on
+Windows and Android.
 
-The Mac remains the AirDrop-facing gateway. Receiver apps on Windows or Android
-accept forwarded uploads over the local network and save them into a configured
-folder.
+Important: UniDrop currently requires a Mac on the same network. The Mac stays
+AirDrop-facing, while Windows and Android receiver apps accept forwarded uploads
+over the local network and save them into a configured folder.
+
+## 🧭 How It Works
 
 ```text
 iPhone / iPad / Mac
@@ -18,7 +21,7 @@ macOS UniDrop Gateway
 Windows or Android UniDrop Receiver
 ```
 
-## macOS gateway
+## 🍎 macOS Gateway
 
 Install the menu bar app:
 
@@ -51,7 +54,7 @@ Receiver auto-detection:
 ./scripts/discover-receiver.py --port 8873
 ```
 
-## Android receiver
+## 🤖 Android Receiver
 
 Build and install by USB debugging:
 
@@ -71,20 +74,20 @@ The Android app:
 APK output:
 
 ```text
-client-android/UniDropReceiver-debug.apk
+client-android/UniDropReceiver.apk
 client-android/dist/UniDropReceiver-debug.apk
 ```
 
-The repository also includes `client-android/UniDropReceiver-debug.apk` as a
-prebuilt debug APK for quick manual installation.
+The repository includes `client-android/UniDropReceiver.apk` as a prebuilt
+debug APK for quick manual installation.
 
-## Windows receiver
+## 🪟 Windows Receiver
 
 Build the Windows tray app and bundled receiver:
 
 ```powershell
 .\scripts\publish-windows.ps1
-.\client-windows\WinDrop.exe
+.\dist\windows\tray\WinDropTray.exe
 ```
 
 The Windows tray app can configure:
@@ -99,12 +102,14 @@ The Windows tray app can configure:
 The current Windows project still keeps some internal `WinDrop*` executable and
 class names for compatibility with the existing prototype.
 
-## Status
+## 🚧 Status
 
 This is an early prototype. The macOS gateway can be discovered by AirDrop and
 can forward test uploads to Android/Windows receivers. Current iOS builds may
 still stop at `Warten` before `/Ask`; that is an AirDrop protocol-compatibility
 issue in the gateway, not a LAN receiver issue.
+
+## 🔐 Safety
 
 Do not store production secrets, pairing tokens, or private certificates in this
 repository.
