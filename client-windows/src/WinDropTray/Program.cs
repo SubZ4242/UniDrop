@@ -387,6 +387,10 @@ sealed class SettingsForm : Form
         autostart.Checked = context.IsAutostartEnabled();
         endpoint.Text = settings.ListenUrl;
         SetStatus(context.IsReceiving);
+        if (string.IsNullOrWhiteSpace(settings.GatewayUrl))
+        {
+            BeginInvoke(new Action(() => DiscoverMacGateway(showMessage: false)));
+        }
     }
 
     public void SetStatus(bool receiving)
@@ -687,14 +691,18 @@ sealed class SettingsForm : Form
         }
     }
 
-    private async void DiscoverMacGateway()
+    private async void DiscoverMacGateway(bool showMessage = true)
     {
+        var hint = gatewayUrl.Text.Trim();
         gatewayUrl.Text = "suche...";
-        var discovered = await Task.Run(() => MacGatewayDiscovery.Find(gatewayUrl.Text.Trim()));
+        var discovered = await Task.Run(() => MacGatewayDiscovery.Find(hint));
         if (discovered is null)
         {
             gatewayUrl.Text = "";
-            MessageBox.Show(this, "Kein UniDrop-Mac-Gateway im lokalen Netz gefunden.", "UniDrop", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (showMessage)
+            {
+                MessageBox.Show(this, "Kein UniDrop-Mac-Gateway im lokalen Netz gefunden.", "UniDrop", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             return;
         }
         gatewayUrl.Text = discovered;

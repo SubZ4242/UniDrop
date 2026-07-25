@@ -48,6 +48,9 @@ public final class MainActivity extends Activity {
         requestNotificationPermissionIfNeeded();
         buildUi();
         refreshUi();
+        if (prefs.getString(ReceiverService.KEY_GATEWAY_HOST, "").isEmpty()) {
+            gatewayView.postDelayed(this::discoverMacGateway, 700);
+        }
         statusView.postDelayed(this::startReceiver, 300);
     }
 
