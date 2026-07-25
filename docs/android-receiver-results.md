@@ -25,7 +25,7 @@
 Output APK:
 
 ```text
-client-android/dist/UniDropReceiver-debug.apk
+client-android/dist/UniDropReceiver.apk
 ```
 
 Installed package:

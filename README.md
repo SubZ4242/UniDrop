@@ -75,7 +75,7 @@ APK output:
 
 ```text
 client-android/UniDropReceiver.apk
-client-android/dist/UniDropReceiver-debug.apk
+client-android/dist/UniDropReceiver.apk
 ```
 
 The repository includes `client-android/UniDropReceiver.apk` as a prebuilt

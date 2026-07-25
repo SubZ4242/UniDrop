@@ -18,4 +18,4 @@ client-android/build/
 client-android/dist/
 client-android/.debug/
 client-android/*.apk
-!client-android/UniDropReceiver-debug.apk
+!client-android/UniDropReceiver.apk

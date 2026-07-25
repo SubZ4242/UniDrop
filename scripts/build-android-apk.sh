@@ -72,10 +72,10 @@ fi
     --ks "$KEYSTORE" \
     --ks-pass pass:android \
     --key-pass pass:android \
-    --out "$DIST_DIR/UniDropReceiver-debug.apk" \
+    --out "$DIST_DIR/UniDropReceiver.apk" \
     "$BUILD_DIR/aligned.apk"
 
-"$APKSIGNER" verify "$DIST_DIR/UniDropReceiver-debug.apk"
-cp "$DIST_DIR/UniDropReceiver-debug.apk" "$ANDROID_ROOT/UniDropReceiver-debug.apk"
-printf 'Built %s\n' "$DIST_DIR/UniDropReceiver-debug.apk"
-printf 'Copied %s\n' "$ANDROID_ROOT/UniDropReceiver-debug.apk"
+"$APKSIGNER" verify "$DIST_DIR/UniDropReceiver.apk"
+cp "$DIST_DIR/UniDropReceiver.apk" "$ANDROID_ROOT/UniDropReceiver.apk"
+printf 'Built %s\n' "$DIST_DIR/UniDropReceiver.apk"
+printf 'Copied %s\n' "$ANDROID_ROOT/UniDropReceiver.apk"

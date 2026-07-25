@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-APK="$PROJECT_ROOT/client-android/dist/UniDropReceiver-debug.apk"
+APK="$PROJECT_ROOT/client-android/dist/UniDropReceiver.apk"
 ADB=${ADB:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-"$HOME/Library/Android/sdk"}}/platform-tools/adb}
 
 if [ ! -x "$ADB" ]; then
