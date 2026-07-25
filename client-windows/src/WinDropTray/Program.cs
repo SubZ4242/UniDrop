@@ -141,10 +141,13 @@ sealed class WinDropTrayContext : ApplicationContext
         }
         else
         {
-            foreach (var process in Process.GetProcessesByName("WinDropReceiver"))
+            foreach (var processName in new[] { "UniDropReceiver", "WinDropReceiver" })
             {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
+                foreach (var process in Process.GetProcessesByName(processName))
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(3000);
+                }
             }
         }
         UpdateStatusViews();
@@ -156,10 +159,12 @@ sealed class WinDropTrayContext : ApplicationContext
             ?? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
         if (enabled)
         {
-            key.SetValue("UniDropTray", Quote(Application.ExecutablePath));
+            key.SetValue("UniDrop", Quote(Application.ExecutablePath));
+            key.DeleteValue("UniDropTray", throwOnMissingValue: false);
         }
         else
         {
+            key.DeleteValue("UniDrop", throwOnMissingValue: false);
             key.DeleteValue("UniDropTray", throwOnMissingValue: false);
         }
     }
@@ -167,7 +172,13 @@ sealed class WinDropTrayContext : ApplicationContext
     public bool IsAutostartEnabled()
     {
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        return key?.GetValue("UniDropTray") is string value
+        return AutostartValueMatches(key?.GetValue("UniDrop") as string)
+            || AutostartValueMatches(key?.GetValue("UniDropTray") as string);
+    }
+
+    private static bool AutostartValueMatches(string? value)
+    {
+        return value is not null
             && value.Contains(Application.ExecutablePath, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -317,28 +328,49 @@ sealed class WinDropTrayContext : ApplicationContext
     private static string LocateReceiver()
     {
         var appDir = AppContext.BaseDirectory;
-        var bundled = Path.Combine(appDir, "WinDropReceiver.exe");
+        var bundled = Path.Combine(appDir, "UniDropReceiver.exe");
         if (File.Exists(bundled))
         {
             return bundled;
         }
 
-        var siblingPublish = Path.GetFullPath(Path.Combine(appDir, "..", "receiver", "WinDropReceiver.exe"));
+        var legacyBundled = Path.Combine(appDir, "WinDropReceiver.exe");
+        if (File.Exists(legacyBundled))
+        {
+            return legacyBundled;
+        }
+
+        var siblingPublish = Path.GetFullPath(Path.Combine(appDir, "..", "receiver", "UniDropReceiver.exe"));
         if (File.Exists(siblingPublish))
         {
             return siblingPublish;
         }
 
+        var legacySiblingPublish = Path.GetFullPath(Path.Combine(appDir, "..", "receiver", "WinDropReceiver.exe"));
+        if (File.Exists(legacySiblingPublish))
+        {
+            return legacySiblingPublish;
+        }
+
         var repoReceiver = Path.GetFullPath(Path.Combine(
             appDir,
-            "..", "..", "..", "..", "..", "WinDropReceiver", "bin", "Debug", "net8.0", "WinDropReceiver.exe"
+            "..", "..", "..", "..", "..", "WinDropReceiver", "bin", "Debug", "net8.0", "UniDropReceiver.exe"
         ));
         if (File.Exists(repoReceiver))
         {
             return repoReceiver;
         }
 
-        throw new FileNotFoundException("WinDropReceiver.exe wurde nicht gefunden. Bitte zuerst publish-windows.ps1 ausfuehren.");
+        var legacyRepoReceiver = Path.GetFullPath(Path.Combine(
+            appDir,
+            "..", "..", "..", "..", "..", "WinDropReceiver", "bin", "Debug", "net8.0", "WinDropReceiver.exe"
+        ));
+        if (File.Exists(legacyRepoReceiver))
+        {
+            return legacyRepoReceiver;
+        }
+
+        throw new FileNotFoundException("UniDropReceiver.exe wurde nicht gefunden. Bitte zuerst publish-windows.ps1 ausfuehren.");
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";

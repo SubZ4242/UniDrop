@@ -7,10 +7,10 @@ Use the tray app for normal operation:
 
 ```powershell
 .\scripts\publish-windows.ps1
-.\client-windows\WinDropTray.exe
+.\client-windows\UniDrop.exe
 ```
 
-`WinDropReceiver.exe` is the background receiver service. The tray app starts it
+`UniDropReceiver.exe` is the background receiver service. The tray app starts it
 automatically when Auto-Empfang is enabled. Both EXEs are published into
 `client-windows/` for quick manual testing from GitHub.
 

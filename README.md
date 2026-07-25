@@ -100,7 +100,7 @@ Build the Windows tray app and bundled receiver:
 
 ```powershell
 .\scripts\publish-windows.ps1
-.\client-windows\WinDropTray.exe
+.\client-windows\UniDrop.exe
 ```
 
 The Windows tray app can configure:
@@ -112,10 +112,9 @@ The Windows tray app can configure:
 - automatic receiving;
 - opening Explorer after receiving files.
 
-The current Windows project still keeps some internal `WinDrop*` executable and
-class names for compatibility with the existing prototype.
-The repository includes prebuilt `client-windows/WinDropTray.exe` and
-`client-windows/WinDropReceiver.exe` for quick manual testing.
+The current Windows project still keeps some internal source folder names for
+compatibility with the existing prototype. The downloadable Windows files are
+published as `client-windows/UniDrop.exe` and `client-windows/UniDropReceiver.exe`.
 
 ## 🚧 Status
 

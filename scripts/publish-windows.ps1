@@ -40,9 +40,9 @@ dotnet publish $TrayProject -c $Configuration -r $Runtime --self-contained true 
     -p:DebugSymbols=false `
     -o $TrayOut
 
-Copy-Item (Join-Path $ReceiverOut "WinDropReceiver.exe") $TrayOut -Force
-Copy-Item (Join-Path $TrayOut "WinDropTray.exe") (Join-Path $ClientOut "WinDropTray.exe") -Force
-Copy-Item (Join-Path $TrayOut "WinDropReceiver.exe") (Join-Path $ClientOut "WinDropReceiver.exe") -Force
-Write-Host "UniDrop Tray EXE:" (Join-Path $TrayOut "WinDropTray.exe")
-Write-Host "UniDrop Receiver EXE:" (Join-Path $TrayOut "WinDropReceiver.exe")
-Write-Host "GitHub Windows EXEs:" (Join-Path $ClientOut "WinDropTray.exe") "and" (Join-Path $ClientOut "WinDropReceiver.exe")
+Copy-Item (Join-Path $ReceiverOut "UniDropReceiver.exe") $TrayOut -Force
+Copy-Item (Join-Path $TrayOut "UniDrop.exe") (Join-Path $ClientOut "UniDrop.exe") -Force
+Copy-Item (Join-Path $TrayOut "UniDropReceiver.exe") (Join-Path $ClientOut "UniDropReceiver.exe") -Force
+Write-Host "UniDrop Tray EXE:" (Join-Path $TrayOut "UniDrop.exe")
+Write-Host "UniDrop Receiver EXE:" (Join-Path $TrayOut "UniDropReceiver.exe")
+Write-Host "GitHub Windows EXEs:" (Join-Path $ClientOut "UniDrop.exe") "and" (Join-Path $ClientOut "UniDropReceiver.exe")
