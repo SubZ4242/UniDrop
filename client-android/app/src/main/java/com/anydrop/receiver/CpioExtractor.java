@@ -17,8 +17,8 @@ public final class CpioExtractor {
     private CpioExtractor() {
     }
 
-    public static List<String> extract(Context context, File cpioFile) throws IOException {
-        List<String> saved = new ArrayList<>();
+    public static List<SavedFile> extract(Context context, File cpioFile) throws IOException {
+        List<SavedFile> saved = new ArrayList<>();
         try (RandomAccessFile archive = new RandomAccessFile(cpioFile, "r")) {
             while (archive.getFilePointer() < archive.length()) {
                 String magic = readText(archive, 6, true);

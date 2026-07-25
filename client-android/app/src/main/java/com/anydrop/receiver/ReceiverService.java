@@ -10,6 +10,8 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 
+import java.util.List;
+
 public final class ReceiverService extends Service {
     public static final String PREFS = "unidrop";
     public static final String ACTION_START = "com.unidrop.receiver.START";
@@ -24,7 +26,9 @@ public final class ReceiverService extends Service {
     public static final String KEY_GATEWAY_HOST = "gateway_host";
     public static final String KEY_GATEWAY_PORT = "gateway_port";
     private static final String CHANNEL_ID = "unidrop_receiver";
+    private static final String RECEIVED_CHANNEL_ID = "unidrop_received";
     private static final int NOTIFICATION_ID = 4242;
+    private static final int RECEIVED_NOTIFICATION_BASE_ID = 4300;
 
     private HttpReceiverServer server;
     private SharedPreferences prefs;
@@ -72,10 +76,13 @@ public final class ReceiverService extends Service {
             prefs.edit()
                 .putBoolean(KEY_RUNNING, status.running)
                 .putString(KEY_LAST_STATUS, status.message)
-                .putInt(KEY_LAST_FILE_COUNT, savedFiles)
+                .putInt(KEY_LAST_FILE_COUNT, savedFiles.size())
                 .apply();
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.notify(NOTIFICATION_ID, notification("UniDrop bereit", status.message));
+            if (!savedFiles.isEmpty()) {
+                manager.notify(RECEIVED_NOTIFICATION_BASE_ID + (int) (System.currentTimeMillis() % 1000), receivedNotification(savedFiles));
+            }
         });
         server.start();
     }
@@ -110,6 +117,31 @@ public final class ReceiverService extends Service {
             .build();
     }
 
+    private Notification receivedNotification(List<SavedFile> files) {
+        SavedFile first = files.get(0);
+        String title = files.size() == 1 ? "Datei empfangen" : files.size() + " Dateien empfangen";
+        String text = files.size() == 1 ? first.displayName : first.displayName + " und weitere";
+        Intent openIntent = new Intent(Intent.ACTION_VIEW)
+            .setDataAndType(first.uri, first.mimeType)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+            this,
+            RECEIVED_NOTIFICATION_BASE_ID,
+            openIntent,
+            Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT : PendingIntent.FLAG_UPDATE_CURRENT
+        );
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(this, RECEIVED_CHANNEL_ID)
+            : new Notification.Builder(this);
+        return builder
+            .setSmallIcon(com.unidrop.receiver.R.drawable.ic_drop)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build();
+    }
+
     private void ensureChannel() {
         if (Build.VERSION.SDK_INT < 26) {
             return;
@@ -122,6 +154,13 @@ public final class ReceiverService extends Service {
         channel.setDescription("Lokaler UniDrop-Empfangsdienst");
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(channel);
+        NotificationChannel receivedChannel = new NotificationChannel(
+            RECEIVED_CHANNEL_ID,
+            "UniDrop Datei empfangen",
+            NotificationManager.IMPORTANCE_DEFAULT
+        );
+        receivedChannel.setDescription("Benachrichtigung nach erfolgreichem Dateiempfang");
+        manager.createNotificationChannel(receivedChannel);
     }
 
     public static final class ServerStatus {
@@ -135,6 +174,6 @@ public final class ReceiverService extends Service {
     }
 
     public interface StatusListener {
-        void onStatus(ServerStatus status, int savedFiles);
+        void onStatus(ServerStatus status, List<SavedFile> savedFiles);
     }
 }

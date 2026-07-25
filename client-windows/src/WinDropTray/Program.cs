@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using System.Media;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -243,7 +244,21 @@ sealed class WinDropTrayContext : ApplicationContext
 
         notifyIcon.BalloonTipTitle = AppName;
         notifyIcon.BalloonTipText = $"Empfangen: {Path.GetFileName(changedPath)}";
+        notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
         notifyIcon.ShowBalloonTip(1800);
+        PlayReceiveSound();
+    }
+
+    private static void PlayReceiveSound()
+    {
+        try
+        {
+            SystemSounds.Asterisk.Play();
+        }
+        catch
+        {
+            // Notification sound is best effort only.
+        }
     }
 
     private static void OpenFolder(string folder)

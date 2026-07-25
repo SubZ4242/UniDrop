@@ -21,7 +21,7 @@ public final class DownloadWriter {
     private DownloadWriter() {
     }
 
-    public static String save(Context context, String displayName, File source) throws IOException {
+    public static SavedFile save(Context context, String displayName, File source) throws IOException {
         String safeName = safeFileName(displayName);
         if (safeName.isEmpty()) {
             safeName = "unidrop-file";
@@ -37,7 +37,8 @@ public final class DownloadWriter {
         return saveLegacy(safeName, source);
     }
 
-    private static String saveDocumentTree(Context context, Uri treeUri, String displayName, File source) throws IOException {
+    private static SavedFile saveDocumentTree(Context context, Uri treeUri, String displayName, File source) throws IOException {
+        String mimeType = guessMime(displayName);
         Uri treeDocument = DocumentsContract.buildDocumentUriUsingTree(
             treeUri,
             DocumentsContract.getTreeDocumentId(treeUri)
@@ -45,7 +46,7 @@ public final class DownloadWriter {
         Uri document = DocumentsContract.createDocument(
             context.getContentResolver(),
             treeDocument,
-            guessMime(displayName),
+            mimeType,
             displayName
         );
         if (document == null) {
@@ -62,14 +63,15 @@ public final class DownloadWriter {
                 output.write(buffer, 0, read);
             }
         }
-        return "Ausgewählter Ordner/" + displayName;
+        return new SavedFile(displayName, "Ausgewählter Ordner/" + displayName, mimeType, document);
     }
 
-    private static String saveMediaStore(Context context, String displayName, File source) throws IOException {
+    private static SavedFile saveMediaStore(Context context, String displayName, File source) throws IOException {
         ContentResolver resolver = context.getContentResolver();
+        String mimeType = guessMime(displayName);
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
-        values.put(MediaStore.MediaColumns.MIME_TYPE, guessMime(displayName));
+        values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
         values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/UniDrop");
         values.put(MediaStore.MediaColumns.IS_PENDING, 1);
         Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
@@ -91,14 +93,14 @@ public final class DownloadWriter {
             ContentValues done = new ContentValues();
             done.put(MediaStore.MediaColumns.IS_PENDING, 0);
             resolver.update(uri, done, null, null);
-            return "Downloads/UniDrop/" + displayName;
+            return new SavedFile(displayName, "Downloads/UniDrop/" + displayName, mimeType, uri);
         } catch (IOException exc) {
             resolver.delete(uri, null, null);
             throw exc;
         }
     }
 
-    private static String saveLegacy(String displayName, File source) throws IOException {
+    private static SavedFile saveLegacy(String displayName, File source) throws IOException {
         File directory = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "UniDrop");
         if (!directory.exists() && !directory.mkdirs()) {
             throw new IOException("Could not create " + directory);
@@ -112,7 +114,7 @@ public final class DownloadWriter {
                 output.write(buffer, 0, read);
             }
         }
-        return destination.getAbsolutePath();
+        return new SavedFile(displayName, destination.getAbsolutePath(), guessMime(displayName), Uri.fromFile(destination));
     }
 
     public static String safeFileName(String name) {

@@ -17,3 +17,4 @@ client-windows/web.config
 client-android/build/
 client-android/dist/
 client-android/.debug/
+client-android/*.apk

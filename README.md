@@ -71,6 +71,7 @@ The Android app:
 APK output:
 
 ```text
+client-android/UniDropReceiver-debug.apk
 client-android/dist/UniDropReceiver-debug.apk
 ```
 

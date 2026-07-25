@@ -19,6 +19,7 @@ import java.net.SocketTimeoutException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -71,7 +72,7 @@ public final class HttpReceiverServer {
             socket.setReuseAddress(true);
             socket.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port));
             serverSocket = socket;
-            listener.onStatus(new ReceiverService.ServerStatus(true, "läuft auf Port " + port), 0);
+            listener.onStatus(new ReceiverService.ServerStatus(true, "läuft auf Port " + port), Collections.emptyList());
             while (running) {
                 try {
                     Socket client = socket.accept();
@@ -84,11 +85,11 @@ public final class HttpReceiverServer {
                 }
             }
         } catch (IOException exc) {
-            listener.onStatus(new ReceiverService.ServerStatus(false, "Port " + port + " nicht verfügbar"), 0);
+            listener.onStatus(new ReceiverService.ServerStatus(false, "Port " + port + " nicht verfügbar"), Collections.emptyList());
             Log.e(TAG, "server failed", exc);
         } finally {
             running = false;
-            listener.onStatus(new ReceiverService.ServerStatus(false, "gestoppt"), 0);
+            listener.onStatus(new ReceiverService.ServerStatus(false, "gestoppt"), Collections.emptyList());
         }
     }
 
@@ -135,8 +136,8 @@ public final class HttpReceiverServer {
         File archive = new File(context.getCacheDir(), "unidrop-upload-" + UUID.randomUUID() + ".archive");
         try {
             copyExactly(input, archive, contentLength);
-            List<String> files = ArchiveExtractor.extract(context, archive, contentType);
-            listener.onStatus(new ReceiverService.ServerStatus(true, files.size() + " Datei(en) gespeichert"), files.size());
+            List<SavedFile> files = ArchiveExtractor.extract(context, archive, contentType);
+            listener.onStatus(new ReceiverService.ServerStatus(true, files.size() + " Datei(en) gespeichert"), files);
             writeResponse(output, 200, "application/json", savedJson(files).getBytes(StandardCharsets.UTF_8));
         } catch (Exception exc) {
             Log.e(TAG, "upload rejected", exc);
@@ -270,13 +271,13 @@ public final class HttpReceiverServer {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private String savedJson(List<String> files) {
+    private String savedJson(List<SavedFile> files) {
         StringBuilder builder = new StringBuilder("{\"status\":\"saved\",\"files\":[");
         for (int i = 0; i < files.size(); i++) {
             if (i > 0) {
                 builder.append(',');
             }
-            builder.append('"').append(files.get(i).replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+            builder.append('"').append(jsonEscape(files.get(i).displayPath)).append('"');
         }
         return builder.append("]}").toString();
     }

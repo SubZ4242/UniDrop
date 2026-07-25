@@ -14,7 +14,7 @@ public final class ArchiveExtractor {
     private ArchiveExtractor() {
     }
 
-    public static List<String> extract(Context context, File archive, String contentType) throws IOException {
+    public static List<SavedFile> extract(Context context, File archive, String contentType) throws IOException {
         File cpio = null;
         try {
             if ("application/x-dvzip".equals(contentType)) {
