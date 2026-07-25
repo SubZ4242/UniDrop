@@ -24,18 +24,30 @@ Windows or Android UniDrop Receiver
 ## 🍎 macOS Gateway
 
 Easiest install: download/open `gateway-macos/UniDrop-macOS.dmg`, then drag
-`UniDrop.app` onto `Applications` in the DMG window. Then run
-`Install Support.command` inside the mounted image. The support installer copies:
-
-- gateway support scripts/config to `~/Library/Application Support/UniDrop`.
-
-After that, start `UniDrop` from Applications.
+`UniDrop.app` onto `Applications` in the DMG window. Start `UniDrop` from
+Applications afterwards. On first launch the app installs its gateway support
+files into `~/Library/Application Support/UniDrop` automatically.
 
 Build the DMG locally:
 
 ```sh
 ./gateway-macos/build-macos-dmg.sh
 ```
+
+For a DMG that opens on another Mac without the manual
+`Privacy & Security` → `Open Anyway` step, build it with an Apple
+`Developer ID Application` certificate and notarize it:
+
+```sh
+UNIDROP_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+UNIDROP_NOTARY_PROFILE="unidrop-notary" \
+./gateway-macos/build-macos-dmg.sh
+```
+
+Create the notary profile once with Apple's `notarytool` and your Apple
+Developer account. Without Developer ID signing and notarization, macOS
+Gatekeeper can still require a manual approval after downloading the DMG from
+GitHub.
 
 Manual developer install:
 

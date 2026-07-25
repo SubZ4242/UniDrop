@@ -19,17 +19,18 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     private var hideMenuBarCheck = NSButton(checkboxWithTitle: "Symbol oben ausblenden", target: nil, action: nil)
     private var toggleButton: NSButton?
     private var isDiscoveryRunning = false
+    private var discoveryOperationInProgress = false
     private var timer: Timer?
     private var configSaveTimer: Timer?
     private var projectRoot: String = FileManager.default.currentDirectoryPath
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        projectRoot = parseProjectRoot()
+        projectRoot = prepareProjectRoot()
+        appLog("applicationDidFinishLaunching projectRoot=\(projectRoot)")
         configureStatusItem()
         buildWindow()
-        refreshNetworkInfo()
-        ensureDiscoveryStartsOnLaunch()
+        configureReceiverAndStartOnLaunch()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.refreshStatus()
         }
@@ -60,6 +61,67 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             return NSString(string: bundledRoot).expandingTildeInPath
         }
         return FileManager.default.currentDirectoryPath
+    }
+
+    private func prepareProjectRoot() -> String {
+        let root = parseProjectRoot()
+        installBundledSupportIfNeeded(to: root)
+        return root
+    }
+
+    private func installBundledSupportIfNeeded(to root: String) {
+        guard let supportURL = Bundle.main.resourceURL?.appendingPathComponent("Support"),
+              FileManager.default.fileExists(atPath: supportURL.path) else {
+            appLog("bundled support not found")
+            return
+        }
+        let targetURL = URL(fileURLWithPath: root)
+        do {
+            try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true)
+            try copySupportItem(
+                from: supportURL.appendingPathComponent("scripts"),
+                to: targetURL.appendingPathComponent("scripts")
+            )
+            try copySupportItem(
+                from: supportURL.appendingPathComponent("gateway-macos/src"),
+                to: targetURL.appendingPathComponent("gateway-macos/src")
+            )
+            try copyConfigDefaults(
+                from: supportURL.appendingPathComponent("gateway-macos/config"),
+                to: targetURL.appendingPathComponent("gateway-macos/config")
+            )
+            appLog("bundled support installed/updated")
+        } catch {
+            statusLabel.stringValue = "Support-Installation fehlgeschlagen"
+            appLog("support install failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func copySupportItem(from source: URL, to target: URL) throws {
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            return
+        }
+        if FileManager.default.fileExists(atPath: target.path) {
+            try FileManager.default.removeItem(at: target)
+        }
+        try FileManager.default.copyItem(at: source, to: target)
+    }
+
+    private func copyConfigDefaults(from source: URL, to target: URL) throws {
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            return
+        }
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let files = try FileManager.default.contentsOfDirectory(
+            at: source,
+            includingPropertiesForKeys: nil
+        )
+        for file in files {
+            let destination = target.appendingPathComponent(file.lastPathComponent)
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.copyItem(at: file, to: destination)
+            }
+        }
     }
 
     private func configureStatusItem() {
@@ -260,13 +322,48 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         startDiscoveryAndPoll()
     }
 
+    private func configureReceiverAndStartOnLaunch() {
+        statusLabel.stringValue = "Status: startet..."
+        setControlsEnabled(false)
+        let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        appLog("configureReceiverAndStartOnLaunch port=\(port)")
+        DispatchQueue.global(qos: .utility).async {
+            let effectivePort = port.isEmpty ? "8873" : port
+            let discovered = self.discoverReceiver(port: effectivePort)
+            self.appLog("initial receiver discovery local=\(discovered.localIp ?? "-") receiver=\(discovered.receiverIp ?? "-") name=\(discovered.receiverName ?? "-")")
+            _ = self.configureForwarding(port: effectivePort, discovered: discovered)
+            DispatchQueue.main.async {
+                if let localIp = discovered.localIp {
+                    self.macIpLabel.stringValue = "Mac-IP: \(localIp)"
+                }
+                self.startDiscoveryAndPoll()
+            }
+        }
+    }
+
     private func startDiscoveryAndPoll() {
+        guard !discoveryOperationInProgress else {
+            appLog("startDiscoveryAndPoll skipped because operation is in progress")
+            return
+        }
+        discoveryOperationInProgress = true
+        appLog("startDiscoveryAndPoll started")
         DispatchQueue.global(qos: .utility).async {
             let startResult = self.runScript("start-discovery-test.sh")
-            let statusResult = self.waitForRunningStatus(fallback: startResult)
+            self.appLog("start script exit=\(startResult.exitCode) output=\(self.oneLine(startResult.output))")
+            var statusResult = self.waitForRunningStatus(fallback: startResult)
+            if !statusResult.output.contains("Status: running") {
+                self.appLog("start status not running; retrying")
+                _ = self.runScript("stop-discovery-test.sh")
+                let retryStart = self.runScript("start-discovery-test.sh")
+                self.appLog("retry start exit=\(retryStart.exitCode) output=\(self.oneLine(retryStart.output))")
+                statusResult = self.waitForRunningStatus(fallback: retryStart)
+            }
+            self.appLog("final start status exit=\(statusResult.exitCode) output=\(self.oneLine(statusResult.output))")
             DispatchQueue.main.async {
                 self.applyStatus(statusResult)
                 self.setControlsEnabled(true)
+                self.discoveryOperationInProgress = false
             }
         }
     }
@@ -401,6 +498,11 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     }
 
     private func restartDiscoveryAfterConfigChange() {
+        guard !discoveryOperationInProgress else {
+            return
+        }
+        discoveryOperationInProgress = true
+        setControlsEnabled(false)
         DispatchQueue.global(qos: .utility).async {
             _ = self.runScript("stop-discovery-test.sh")
             let startResult = self.runScript("start-discovery-test.sh")
@@ -408,6 +510,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             DispatchQueue.main.async {
                 self.applyStatus(statusResult)
                 self.setControlsEnabled(true)
+                self.discoveryOperationInProgress = false
             }
         }
     }
@@ -431,9 +534,10 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
 
     private func runScript(_ name: String) -> ScriptResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: projectRoot)
+        let scriptURL = URL(fileURLWithPath: projectRoot)
             .appendingPathComponent("scripts")
             .appendingPathComponent(name)
+        process.executableURL = scriptURL
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -444,6 +548,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             let output = String(data: data, encoding: .utf8) ?? ""
             return ScriptResult(exitCode: process.terminationStatus, output: output)
         } catch {
+            appLog("runScript failed script=\(scriptURL.path) error=\(error.localizedDescription)")
             return ScriptResult(exitCode: 127, output: "Konnte \(name) nicht starten: \(error.localizedDescription)")
         }
     }
@@ -471,26 +576,46 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         }
     }
 
+    private func appLog(_ message: String) {
+        let root = projectRoot.isEmpty ? NSString(string: "~/Library/Application Support/UniDrop").expandingTildeInPath : projectRoot
+        let logDir = URL(fileURLWithPath: root).appendingPathComponent(".runtime/menubar")
+        do {
+            try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+            let formatter = ISO8601DateFormatter()
+            let line = "\(formatter.string(from: Date())) \(message)\n"
+            let logURL = logDir.appendingPathComponent("app.log")
+            if let data = line.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: logURL.path),
+                   let handle = try? FileHandle(forWritingTo: logURL) {
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                    try handle.close()
+                } else {
+                    try data.write(to: logURL, options: .atomic)
+                }
+            }
+        } catch {
+            // Keep the GUI silent if diagnostic logging is unavailable.
+        }
+    }
+
+    private func oneLine(_ text: String) -> String {
+        let compact = text.replacingOccurrences(of: "\n", with: " | ")
+        if compact.count <= 1200 {
+            return compact
+        }
+        return String(compact.prefix(1200)) + "..."
+    }
+
     private func refreshNetworkInfo() {
+        guard !discoveryOperationInProgress else {
+            return
+        }
         let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         DispatchQueue.global(qos: .utility).async {
             let effectivePort = port.isEmpty ? "8873" : port
             let discovered = self.discoverReceiver(port: effectivePort)
-            if discovered.receiverIp != nil {
-                var arguments = [
-                    "--windows-host", "",
-                    "--windows-port", effectivePort,
-                    "--gateway-port", effectivePort,
-                    "--enabled", "true",
-                ]
-                if let receiverName = discovered.receiverName {
-                    arguments += [
-                        "--display-name", receiverName,
-                        "--model-name", self.modelName(for: receiverName),
-                    ]
-                }
-                _ = self.runPythonScript("configure-forwarding.py", arguments: arguments)
-            }
+            _ = self.configureForwarding(port: effectivePort, discovered: discovered)
             DispatchQueue.main.async {
                 if let localIp = discovered.localIp {
                     self.macIpLabel.stringValue = "Mac-IP: \(localIp)"
@@ -500,10 +625,28 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
                 if let receiverIp = discovered.receiverIp {
                     let receiverText = discovered.receiverName ?? receiverIp
                     self.statusLabel.stringValue = "Empfänger: \(receiverText)"
-                    self.restartDiscoveryAfterConfigChange()
                 }
             }
         }
+    }
+
+    private func configureForwarding(
+        port: String,
+        discovered: (localIp: String?, receiverIp: String?, receiverName: String?)
+    ) -> ScriptResult {
+        var arguments = [
+            "--windows-host", "",
+            "--windows-port", port,
+            "--gateway-port", port,
+            "--enabled", "true",
+        ]
+        if let receiverName = discovered.receiverName {
+            arguments += [
+                "--display-name", receiverName,
+                "--model-name", self.modelName(for: receiverName),
+            ]
+        }
+        return runPythonScript("configure-forwarding.py", arguments: arguments)
     }
 
     private func discoverReceiver(port: String) -> (localIp: String?, receiverIp: String?, receiverName: String?) {
