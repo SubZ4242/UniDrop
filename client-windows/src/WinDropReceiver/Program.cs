@@ -728,11 +728,7 @@ static class DvZipExtractor
                 throw new EndOfStreamException("Incomplete DVZip chunk length.");
             }
 
-            var compressedLength =
-                lengthBytes[0] << 24
-                | lengthBytes[1] << 16
-                | lengthBytes[2] << 8
-                | lengthBytes[3];
+            var compressedLength = ParseDvZipChunkLength(lengthBytes);
             if (compressedLength == 0)
             {
                 break;
@@ -753,6 +749,31 @@ static class DvZipExtractor
             }
         }
         output.Position = 0;
+    }
+
+    private static int ParseDvZipChunkLength(ReadOnlySpan<byte> lengthBytes)
+    {
+        var bigEndian =
+            lengthBytes[0] << 24
+            | lengthBytes[1] << 16
+            | lengthBytes[2] << 8
+            | lengthBytes[3];
+        if (bigEndian >= 0)
+        {
+            return bigEndian;
+        }
+
+        var littleEndian =
+            lengthBytes[0]
+            | lengthBytes[1] << 8
+            | lengthBytes[2] << 16
+            | lengthBytes[3] << 24;
+        if (littleEndian >= 0 && littleEndian <= 256 * 1024 * 1024)
+        {
+            return littleEndian;
+        }
+
+        return bigEndian;
     }
 
     private static int ReadAtMost(Stream input, Span<byte> buffer)

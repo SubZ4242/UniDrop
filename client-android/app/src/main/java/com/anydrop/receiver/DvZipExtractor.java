@@ -34,10 +34,7 @@ public final class DvZipExtractor {
                 if (read != 4) {
                     throw new EOFException("Incomplete DVZip chunk length");
                 }
-                int compressedLength = ((lengthBytes[0] & 0xff) << 24)
-                    | ((lengthBytes[1] & 0xff) << 16)
-                    | ((lengthBytes[2] & 0xff) << 8)
-                    | (lengthBytes[3] & 0xff);
+                int compressedLength = parseChunkLength(lengthBytes);
                 if (compressedLength == 0) {
                     break;
                 }
@@ -83,6 +80,24 @@ public final class DvZipExtractor {
             offset += read;
         }
         return offset;
+    }
+
+    private static int parseChunkLength(byte[] lengthBytes) throws IOException {
+        int bigEndian = ((lengthBytes[0] & 0xff) << 24)
+            | ((lengthBytes[1] & 0xff) << 16)
+            | ((lengthBytes[2] & 0xff) << 8)
+            | (lengthBytes[3] & 0xff);
+        if (bigEndian >= 0) {
+            return bigEndian;
+        }
+        int littleEndian = (lengthBytes[0] & 0xff)
+            | ((lengthBytes[1] & 0xff) << 8)
+            | ((lengthBytes[2] & 0xff) << 16)
+            | ((lengthBytes[3] & 0xff) << 24);
+        if (littleEndian >= 0 && littleEndian <= 256 * 1024 * 1024) {
+            return littleEndian;
+        }
+        throw new IOException("Invalid DVZip chunk length " + bigEndian);
     }
 
     private static final class LimitedInputStream extends java.io.InputStream {

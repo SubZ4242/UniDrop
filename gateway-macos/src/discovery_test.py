@@ -226,7 +226,7 @@ def discover_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
         futures = [executor.submit(worker, host) for host in hosts]
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
-            if result is not None:
+            if result is not None and receiver_matches_display_target(config, result):
                 found.append(result)
 
     found.sort(key=lambda item: (
@@ -245,6 +245,25 @@ def discover_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
     return None
 
 
+def normalized_target(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def receiver_matches_display_target(config: DiscoveryConfig, receiver: ReceiverProbe) -> bool:
+    display_name = normalized_target(config.display_name)
+    receiver_name = normalized_target(receiver.name)
+    model_name = normalized_target(config.model_name)
+    if display_name in {"", "unidrop", "unidrop gateway"}:
+        return True
+    if receiver_name == display_name:
+        return True
+    if "android" in model_name:
+        return receiver.platform == "android"
+    if "windows" in model_name:
+        return receiver.platform == "windows" or "windows" in receiver_name
+    return False
+
+
 def resolve_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
     if not config.forwarding_enabled:
         return None
@@ -252,6 +271,14 @@ def resolve_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
         result = probe_receiver(config, config.windows_host)
         if result is None:
             LOGGER.warning("Configured receiver is not reachable: %s:%d", config.windows_host, config.windows_port)
+        elif not receiver_matches_display_target(config, result):
+            LOGGER.warning(
+                "Configured receiver %s at %s does not match visible AirDrop target %s",
+                result.name,
+                result.host,
+                config.display_name,
+            )
+            return None
         return result
     return discover_receiver(config)
 
