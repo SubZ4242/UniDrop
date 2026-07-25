@@ -6,19 +6,18 @@ private struct ScriptResult {
     let output: String
 }
 
-private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
+private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate {
     private let launchdLabel = "com.windrop.gateway.menubar"
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var window: NSWindow?
     private var statusLabel = NSTextField(labelWithString: "Status: pruefe...")
     private var macIpLabel = NSTextField(labelWithString: "Mac-IP: suche...")
-    private var hostField = NSTextField(string: "")
     private var portField = NSTextField(string: "8873")
     private var autostartCheck = NSButton(checkboxWithTitle: "Mit macOS starten", target: nil, action: nil)
     private var toggleButton: NSButton?
-    private var saveButton: NSButton?
     private var isDiscoveryRunning = false
     private var timer: Timer?
+    private var configSaveTimer: Timer?
     private var projectRoot: String = FileManager.default.currentDirectoryPath
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -35,6 +34,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
 
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
+        configSaveTimer?.invalidate()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -68,7 +68,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
 
     private func buildWindow() {
         let panel = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 292),
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 244),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -96,25 +96,22 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         macIpLabel.textColor = .secondaryLabelColor
         macIpLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let hostRow = labeledField(label: "Ziel", field: hostField)
         let portRow = labeledField(label: "Port", field: portField)
         let toggle = button("Stoppen", #selector(toggleDiscovery))
-        let save = button("Speichern", #selector(saveForwarding))
         let quitButton = button("Beenden", #selector(quit))
-        let buttonRow = row([save, toggle, quitButton])
+        let buttonRow = row([toggle, quitButton])
         toggleButton = toggle
-        saveButton = save
 
         autostartCheck.target = self
         autostartCheck.action = #selector(toggleAutostart)
         autostartCheck.translatesAutoresizingMaskIntoConstraints = false
 
-        hostField.placeholderString = "auto"
         portField.placeholderString = "8873"
+        portField.delegate = self
         loadForwardingConfig()
         loadAutostartState()
 
-        [icon, title, statusLabel, macIpLabel, hostRow, portRow, autostartCheck, buttonRow].forEach(content.addSubview)
+        [icon, title, statusLabel, macIpLabel, portRow, autostartCheck, buttonRow].forEach(content.addSubview)
 
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
@@ -134,16 +131,12 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             macIpLabel.trailingAnchor.constraint(equalTo: title.trailingAnchor),
             macIpLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 4),
 
-            hostRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
-            hostRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
-            hostRow.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 38),
+            portRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            portRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            portRow.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 38),
 
-            portRow.leadingAnchor.constraint(equalTo: hostRow.leadingAnchor),
-            portRow.trailingAnchor.constraint(equalTo: hostRow.trailingAnchor),
-            portRow.topAnchor.constraint(equalTo: hostRow.bottomAnchor, constant: 10),
-
-            autostartCheck.leadingAnchor.constraint(equalTo: hostRow.leadingAnchor, constant: 88),
-            autostartCheck.trailingAnchor.constraint(equalTo: hostRow.trailingAnchor),
+            autostartCheck.leadingAnchor.constraint(equalTo: portRow.leadingAnchor, constant: 88),
+            autostartCheck.trailingAnchor.constraint(equalTo: portRow.trailingAnchor),
             autostartCheck.topAnchor.constraint(equalTo: portRow.bottomAnchor, constant: 16),
 
             buttonRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
@@ -322,30 +315,36 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         }
     }
 
-    @objc private func saveForwarding() {
-        var host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField, field === portField else {
+            return
+        }
+        scheduleAutoSaveForwarding()
+    }
+
+    private func scheduleAutoSaveForwarding() {
+        configSaveTimer?.invalidate()
+        configSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: false) { [weak self] _ in
+            self?.saveForwardingAutomatically()
+        }
+    }
+
+    private func saveForwardingAutomatically() {
         let port = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         var detectedName: String?
         if Int(port) == nil {
             statusLabel.stringValue = "Port pruefen"
             return
         }
-        if host.isEmpty || host.lowercased() == "auto" {
-            let detectedReceiver = discoverReceiver(port: port)
-            if detectedReceiver.receiverIp != nil {
-                host = ""
-                hostField.stringValue = "auto"
-                detectedName = detectedReceiver.receiverName
-            } else {
-                statusLabel.stringValue = "Kein Empfänger auf Port \(port) gefunden"
-                return
-            }
+        let detectedReceiver = discoverReceiver(port: port)
+        if detectedReceiver.receiverIp != nil {
+            detectedName = detectedReceiver.receiverName
         }
         setControlsEnabled(false)
-        statusLabel.stringValue = "Speichere Konfiguration..."
+        statusLabel.stringValue = "Speichere automatisch..."
         DispatchQueue.global(qos: .utility).async {
             var arguments = [
-                    "--windows-host", host,
+                "--windows-host", "",
                 "--windows-port", port,
                 "--gateway-port", port,
                 "--enabled", "true"
@@ -362,7 +361,7 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
             )
             DispatchQueue.main.async {
                 if result.exitCode != 0 {
-                    self.statusLabel.stringValue = "Speichern fehlgeschlagen"
+                    self.statusLabel.stringValue = "Auto-Speichern fehlgeschlagen"
                     self.setControlsEnabled(true)
                     return
                 }
@@ -394,10 +393,8 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        hostField.isEnabled = enabled
         portField.isEnabled = enabled
         autostartCheck.isEnabled = enabled
-        saveButton?.isEnabled = enabled
         toggleButton?.isEnabled = enabled
     }
 
@@ -470,7 +467,6 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
                     self.macIpLabel.stringValue = "Mac-IP: nicht gefunden"
                 }
                 if let receiverIp = discovered.receiverIp {
-                    self.hostField.stringValue = "auto"
                     let receiverText = discovered.receiverName ?? receiverIp
                     self.statusLabel.stringValue = "Empfänger: \(receiverText)"
                     self.restartDiscoveryAfterConfigChange()
@@ -506,9 +502,6 @@ private final class UniDropMenuBarApp: NSObject, NSApplicationDelegate, NSWindow
         let configURL = URL(fileURLWithPath: projectRoot).appendingPathComponent("gateway-macos/config/discovery-test.toml")
         guard let text = try? String(contentsOf: configURL, encoding: .utf8) else {
             return
-        }
-        if let host = match(text, #"(?m)^windows_host\s*=\s*"([^"]*)""#) {
-            hostField.stringValue = host.isEmpty ? "auto" : host
         }
         if let port = match(text, #"(?m)^windows_port\s*=\s*([0-9]+)"#) {
             portField.stringValue = port
