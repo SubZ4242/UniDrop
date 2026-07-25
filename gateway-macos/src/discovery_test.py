@@ -45,6 +45,12 @@ MAX_DVZIP_CHUNK_BYTES = 256 * 1024 * 1024
 
 
 @dataclasses.dataclass(frozen=True)
+class DvZipChunkHeader:
+    length: int
+    raw: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
 class DiscoveryConfig:
     display_name: str
     model_name: str
@@ -169,17 +175,21 @@ def looks_like_cpio_or_gzip(path: Path) -> bool:
 
 
 def parse_dvzip_chunk_length(length_bytes: bytes) -> int:
+    return parse_dvzip_chunk_header(length_bytes).length
+
+
+def parse_dvzip_chunk_header(length_bytes: bytes) -> DvZipChunkHeader:
     if len(length_bytes) != 4:
         raise EOFError("Incomplete DVZip chunk length")
     big_endian = int.from_bytes(length_bytes, "big", signed=True)
     if 0 <= big_endian <= MAX_DVZIP_CHUNK_BYTES:
-        return big_endian
+        return DvZipChunkHeader(big_endian, raw=False)
     flagged_big_endian = big_endian & 0x7FFFFFFF
     if 0 < flagged_big_endian <= MAX_DVZIP_CHUNK_BYTES:
-        return flagged_big_endian
+        return DvZipChunkHeader(flagged_big_endian, raw=True)
     little_endian = int.from_bytes(length_bytes, "little", signed=True)
     if 0 <= little_endian <= MAX_DVZIP_CHUNK_BYTES:
-        return little_endian
+        return DvZipChunkHeader(little_endian, raw=False)
     raise ValueError(f"Invalid DVZip chunk length {big_endian}")
 
 
@@ -225,13 +235,13 @@ def expand_dvzip_to_cpio(input_path: Path, output_path: Path) -> int:
             length_bytes = source.read(4)
             if not length_bytes:
                 break
-            compressed_length = parse_dvzip_chunk_length(length_bytes)
-            if compressed_length == 0:
+            header = parse_dvzip_chunk_header(length_bytes)
+            if header.length == 0:
                 break
-            compressed = source.read(compressed_length)
-            if len(compressed) != compressed_length:
+            compressed = source.read(header.length)
+            if len(compressed) != header.length:
                 raise EOFError("DVZip chunk ended before advertised length")
-            decompressed = decompress_dvzip_chunk(compressed, chunk_index)
+            decompressed = compressed if header.raw else decompress_dvzip_chunk(compressed, chunk_index)
             output.write(decompressed)
             total += len(decompressed)
             chunk_index += 1

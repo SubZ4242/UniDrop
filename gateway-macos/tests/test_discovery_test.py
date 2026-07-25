@@ -91,6 +91,9 @@ class DiscoveryConfigTests(unittest.TestCase):
 
     def test_parse_dvzip_flagged_big_endian_length(self):
         self.assertEqual(MODULE.parse_dvzip_chunk_length(bytes.fromhex("80020000")), 131072)
+        header = MODULE.parse_dvzip_chunk_header(bytes.fromhex("80020000"))
+        self.assertEqual(header.length, 131072)
+        self.assertTrue(header.raw)
 
     def test_expand_dvzip_to_cpio(self):
         cpio = b"070701" + b"0" * 128 + b"payload"
@@ -99,6 +102,18 @@ class DiscoveryConfigTests(unittest.TestCase):
             input_path = Path(directory) / "input.dvzip"
             output_path = Path(directory) / "output.cpio"
             input_path.write_bytes(len(compressed).to_bytes(4, "big") + compressed)
+
+            total = MODULE.expand_dvzip_to_cpio(input_path, output_path)
+
+            self.assertEqual(total, len(cpio))
+            self.assertEqual(output_path.read_bytes(), cpio)
+
+    def test_expand_dvzip_raw_flagged_chunk_to_cpio(self):
+        cpio = b"070707000000payload"
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.dvzip"
+            output_path = Path(directory) / "output.cpio"
+            input_path.write_bytes((len(cpio) | 0x80000000).to_bytes(4, "big") + cpio)
 
             total = MODULE.expand_dvzip_to_cpio(input_path, output_path)
 

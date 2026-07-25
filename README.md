@@ -75,6 +75,9 @@ client-android/UniDropReceiver-debug.apk
 client-android/dist/UniDropReceiver-debug.apk
 ```
 
+The repository also includes `client-android/UniDropReceiver-debug.apk` as a
+prebuilt debug APK for quick manual installation.
+
 ## Windows receiver
 
 Build the Windows tray app and bundled receiver:
