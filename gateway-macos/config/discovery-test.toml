@@ -1,0 +1,20 @@
+[receiver]
+display_name = "UniDrop"
+model_name = "UniDrop Gateway"
+service_id = "d4c7a9e2106b"
+bonjour_host = "unidrop-gateway"
+
+[network]
+interface = "awdl0"
+port = 8872
+windows_host = ""
+windows_port = 8873
+
+[forwarding]
+enabled = false
+pairing_token_env = "WINDROP_PAIRING_TOKEN"
+health_timeout_seconds = 2
+upload_timeout_seconds = 600
+
+[logging]
+level = "warn"

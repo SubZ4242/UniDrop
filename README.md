@@ -1,0 +1,103 @@
+# 💧 UniDrop
+
+UniDrop is an experimental AirDrop gateway prototype.
+
+The Mac remains the AirDrop-facing gateway. Receiver apps on Windows or Android
+accept forwarded uploads over the local network and save them into a configured
+folder.
+
+```text
+iPhone / iPad / Mac
+        |
+        | AirDrop over AWDL
+        v
+macOS UniDrop Gateway
+        |
+        | local HTTP forwarding
+        v
+Windows or Android UniDrop Receiver
+```
+
+## macOS gateway
+
+Install the menu bar app:
+
+```sh
+./scripts/install-macos-app.sh
+open "/Applications/UniDrop.app"
+```
+
+The app:
+
+- starts the gateway automatically on launch;
+- shows the Mac LAN IP;
+- scans the local `/24` network for a compatible receiver on the configured port;
+- keeps the receiver IP editable for manual override;
+- exposes the AirDrop receiver name configured in `gateway-macos/config/discovery-test.toml`.
+
+Debug commands:
+
+```sh
+./scripts/start-discovery-test.sh
+./scripts/status-discovery-test.sh
+./scripts/probe-discovery-test.py .runtime/discovery-test/state.json
+./scripts/stop-discovery-test.sh
+```
+
+Receiver auto-detection:
+
+```sh
+./scripts/discover-receiver.py --port 8873
+```
+
+## Android receiver
+
+Build and install by USB debugging:
+
+```sh
+./scripts/build-android-apk.sh
+./scripts/install-android-apk.sh
+```
+
+The Android app:
+
+- runs a foreground service;
+- listens on the configured port, default `8873`;
+- saves to `Downloads/UniDrop` by default;
+- can use a manually selected Android folder through the system folder picker.
+
+APK output:
+
+```text
+client-android/dist/UniDropReceiver-debug.apk
+```
+
+## Windows receiver
+
+Build the Windows tray app and bundled receiver:
+
+```powershell
+.\scripts\publish-windows.ps1
+.\client-windows\WinDrop.exe
+```
+
+The Windows tray app can configure:
+
+- listen URL;
+- destination folder with a browse button;
+- Windows autostart;
+- automatic receiving;
+- opening Explorer after receiving files.
+
+The current Windows project still keeps some internal `WinDrop*` executable and
+class names for compatibility with the existing prototype.
+
+## Status
+
+This is an early prototype. The macOS gateway can be discovered by AirDrop and
+can forward test uploads to Android/Windows receivers. Current iOS builds may
+still stop at `Warten` before `/Ask`; that is an AirDrop protocol-compatibility
+issue in the gateway, not a LAN receiver issue.
+
+Do not store production secrets, pairing tokens, or private certificates in this
+repository.
