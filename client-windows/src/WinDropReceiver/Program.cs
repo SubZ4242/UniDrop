@@ -112,11 +112,7 @@ await app.RunAsync();
 
 static class ReceiverInfo
 {
-<<<<<<< ours
-    public const string Version = "0.3.11-large-upload-kestrel";
-=======
     public const string Version = "0.4.1-large-upload-kestrel";
->>>>>>> theirs
     public static readonly string DisplayName = Environment.MachineName;
     public static readonly TimeSpan UploadIdleTimeout = TimeSpan.FromSeconds(15);
     public static readonly string[] SupportedContentTypes =
