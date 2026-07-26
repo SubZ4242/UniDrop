@@ -10,6 +10,7 @@ APP_ROOT="$ANDROID_ROOT/app/src/main"
 BUILD_DIR="$ANDROID_ROOT/build"
 DIST_DIR="$ANDROID_ROOT/dist"
 KEY_DIR="$ANDROID_ROOT/.debug"
+STABLE_KEY_DIR="$HOME/.android"
 
 SDK_ROOT=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-"$HOME/Library/Android/sdk"}}
 if [ ! -d "$SDK_ROOT" ]; then
@@ -33,7 +34,7 @@ for tool in "$ANDROID_JAR" "$AAPT2" "$D8" "$ZIPALIGN" "$APKSIGNER"; do
 done
 
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR/compiled-res" "$BUILD_DIR/gen" "$BUILD_DIR/classes" "$BUILD_DIR/dex" "$DIST_DIR" "$KEY_DIR"
+mkdir -p "$BUILD_DIR/compiled-res" "$BUILD_DIR/gen" "$BUILD_DIR/classes" "$BUILD_DIR/dex" "$DIST_DIR" "$KEY_DIR" "$STABLE_KEY_DIR"
 
 "$AAPT2" compile --dir "$APP_ROOT/res" -o "$BUILD_DIR/compiled-res/resources.zip"
 "$AAPT2" link \
@@ -57,7 +58,7 @@ cp "$BUILD_DIR/resources.apk" "$BUILD_DIR/with-dex.apk"
 
 "$ZIPALIGN" -f 4 "$BUILD_DIR/with-dex.apk" "$BUILD_DIR/aligned.apk"
 
-KEYSTORE="$KEY_DIR/unidrop-debug.keystore"
+KEYSTORE="${UNIDROP_ANDROID_KEYSTORE:-$STABLE_KEY_DIR/unidrop-debug.keystore}"
 if [ ! -f "$KEYSTORE" ]; then
     keytool -genkeypair \
         -keystore "$KEYSTORE" \
