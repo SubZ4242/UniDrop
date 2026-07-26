@@ -11,7 +11,7 @@ windows_host = ""
 windows_port = 8873
 
 [forwarding]
-enabled = false
+enabled = true
 pairing_token_env = "WINDROP_PAIRING_TOKEN"
 health_timeout_seconds = 2
 upload_timeout_seconds = 600

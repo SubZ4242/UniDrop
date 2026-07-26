@@ -61,9 +61,10 @@ The app:
 - starts the gateway automatically on launch;
 - shows the Mac LAN IP;
 - exposes a lightweight LAN discovery endpoint at `http://<MAC-IP>:8873/gateway`;
-- scans the local `/24` network for a compatible receiver on the configured port;
-- keeps the receiver IP editable for manual override;
-- exposes the AirDrop receiver name configured in `gateway-macos/config/discovery-test.toml`.
+- scans the local `/24` network for compatible Windows/Android receivers on the configured receiver port;
+- publishes one AirDrop target per discovered receiver;
+- keeps Windows/Android receivers on port `8873` by default;
+- uses separate internal macOS AirDrop ports per visible target when multiple receivers are online.
 
 Debug commands:
 
@@ -92,10 +93,18 @@ Build and install by USB debugging:
 The Android app:
 
 - runs a foreground service;
+- keeps a CPU wake lock while the receiver is running so Samsung/Doze does not suspend the HTTP listener;
 - can scan the local `/24` network for the UniDrop Mac gateway on the configured port;
 - listens on the configured port, default `8873`;
 - saves to `Downloads/UniDrop` by default;
 - can use a manually selected Android folder through the system folder picker.
+
+On Samsung phones, also disable battery optimization for UniDrop or whitelist it
+with ADB for reliable always-on receiving:
+
+```sh
+adb shell dumpsys deviceidle whitelist +com.unidrop.receiver
+```
 
 APK output:
 
@@ -131,10 +140,9 @@ published as `client-windows/UniDrop.exe` and `client-windows/UniDropReceiver.ex
 
 ## 🚧 Status
 
-This is an early prototype. The macOS gateway can be discovered by AirDrop and
-can forward test uploads to Android/Windows receivers. Current iOS builds may
-still stop at `Warten` before `/Ask`; that is an AirDrop protocol-compatibility
-issue in the gateway, not a LAN receiver issue.
+This is an early prototype. The macOS gateway can publish separate AirDrop
+targets for discovered Android and Windows receivers and forward received test
+uploads to them over the local network.
 
 ## 🔐 Safety
 

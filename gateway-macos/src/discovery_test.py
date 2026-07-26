@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -36,7 +37,9 @@ MAX_DISCOVER_REQUEST_BYTES = 1_048_576
 MAX_ASK_REQUEST_BYTES = 1_048_576
 UPLOAD_IDLE_TIMEOUT_SECONDS = 20
 RECEIVER_CACHE_TTL_SECONDS = 60
-RECEIVER_CACHE_PROBE_TIMEOUT_SECONDS = 0.25
+RECEIVER_CACHE_PROBE_TIMEOUT_SECONDS = 1.0
+RECEIVER_DISCOVERY_PROBE_TIMEOUT_SECONDS = 1.25
+RECEIVER_DISCOVERY_WORKERS = 32
 SERVICE_TYPE = "_airdrop._tcp"
 ADDRESS_SAFETY_CHECK_SECONDS = 60
 SUPPORTED_UPLOAD_CONTENT_TYPES = {
@@ -67,6 +70,7 @@ class DiscoveryConfig:
     health_timeout_seconds: int
     upload_timeout_seconds: int
     log_level: str
+    awdl_ipv6: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "DiscoveryConfig":
@@ -86,6 +90,7 @@ class DiscoveryConfig:
             health_timeout_seconds=int(raw.get("forwarding", {}).get("health_timeout_seconds", 2)),
             upload_timeout_seconds=int(raw.get("forwarding", {}).get("upload_timeout_seconds", 600)),
             log_level=str(raw.get("logging", {}).get("level", "warn")).lower(),
+            awdl_ipv6=str(raw.get("network", {}).get("awdl_ipv6", "")).strip(),
         )
         config.validate()
         return config
@@ -151,6 +156,10 @@ def interface_ipv6(interface: str) -> tuple[str, int]:
             if parsed.is_link_local:
                 return str(parsed), interface_index
     raise RuntimeError(f"{interface} has no link-local IPv6 address")
+
+
+def normalize_ipv6(address: str) -> str:
+    return str(ipaddress.IPv6Address(address.split("%", 1)[0]))
 
 
 def build_discover_response(config: DiscoveryConfig) -> bytes:
@@ -328,34 +337,7 @@ def probe_receiver(config: DiscoveryConfig, host: str, timeout: float | None = N
 
 
 def discover_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
-    own_ip = local_lan_ipv4()
-    if own_ip is None:
-        LOGGER.warning("Could not auto-discover receiver because Mac LAN IP is unknown")
-        return None
-    try:
-        network = ipaddress.IPv4Network(f"{own_ip}/24", strict=False)
-    except ValueError:
-        return None
-
-    found: list[ReceiverProbe] = []
-    hosts = [str(host) for host in network.hosts() if str(host) != own_ip]
-
-    def worker(host: str) -> ReceiverProbe | None:
-        return probe_receiver(config, host, timeout=0.45)
-
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
-        futures = [executor.submit(worker, host) for host in hosts]
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result is not None and receiver_matches_display_target(config, result):
-                found.append(result)
-
-    found.sort(key=lambda item: (
-        0 if item.platform == "android" else 1 if item.platform == "windows" else 2,
-        tuple(int(part) for part in item.host.split(".")),
-    ))
+    found = discover_receivers(config)
     if found:
         LOGGER.warning(
             "Auto-discovered receiver %s at %s:%d",
@@ -366,6 +348,108 @@ def discover_receiver(config: DiscoveryConfig) -> ReceiverProbe | None:
         return found[0]
     LOGGER.warning("No UniDrop receiver found on local /24 port %d", config.windows_port)
     return None
+
+
+def discover_receivers(config: DiscoveryConfig) -> list[ReceiverProbe]:
+    own_ip = local_lan_ipv4()
+    if own_ip is None:
+        LOGGER.warning("Could not auto-discover receiver because Mac LAN IP is unknown")
+        return []
+    try:
+        network = ipaddress.IPv4Network(f"{own_ip}/24", strict=False)
+    except ValueError:
+        return []
+
+    found: list[ReceiverProbe] = []
+    hosts = [str(host) for host in network.hosts() if str(host) != own_ip]
+
+    def worker(host: str) -> ReceiverProbe | None:
+        return probe_receiver(config, host, timeout=RECEIVER_DISCOVERY_PROBE_TIMEOUT_SECONDS)
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=RECEIVER_DISCOVERY_WORKERS) as executor:
+        futures = [executor.submit(worker, host) for host in hosts]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result is not None:
+                found.append(result)
+
+    found.sort(key=lambda item: (
+        0 if item.platform == "android" else 1 if item.platform == "windows" else 2,
+        tuple(int(part) for part in item.host.split(".")),
+    ))
+    return found
+
+
+def slugify_dns_label(value: str, fallback: str) -> str:
+    label = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())
+    label = re.sub(r"-+", "-", label).strip("-")
+    if not label:
+        label = fallback
+    if not re.match(r"^[a-z0-9]", label):
+        label = f"{fallback}-{label}"
+    label = label[:63].strip("-")
+    if not re.search(r"[a-z0-9]$", label):
+        label = f"{label}0"[:63]
+    return label or fallback
+
+
+def model_name_for_receiver(receiver: ReceiverProbe) -> str:
+    if receiver.platform == "android":
+        return "Android Phone"
+    if receiver.platform == "windows":
+        return "Windows PC"
+    return "UniDrop Receiver"
+
+
+def config_for_receiver(base: DiscoveryConfig, receiver: ReceiverProbe) -> DiscoveryConfig:
+    stable = hashlib.sha1(f"{receiver.platform}:{receiver.name}".encode("utf-8")).hexdigest()[:12]
+    host_suffix = receiver.platform or "receiver"
+    bonjour_host = slugify_dns_label(f"unidrop-{host_suffix}-{receiver.name}", "unidrop-receiver")
+    return dataclasses.replace(
+        base,
+        display_name=receiver.name,
+        model_name=model_name_for_receiver(receiver),
+        service_id=stable,
+        bonjour_host=bonjour_host,
+        windows_host=receiver.host,
+        forwarding_enabled=True,
+    )
+
+
+def with_target_awdl_addresses(
+    target_configs: list[DiscoveryConfig],
+    native_ipv6_address: str,
+) -> list[DiscoveryConfig]:
+    if len(target_configs) <= 1:
+        return [dataclasses.replace(target_configs[0], awdl_ipv6=native_ipv6_address)]
+    return [
+        dataclasses.replace(
+            target,
+            awdl_ipv6=native_ipv6_address,
+            port=target.port + index,
+        )
+        for index, target in enumerate(target_configs, start=1)
+    ]
+
+
+def build_target_configs(base: DiscoveryConfig) -> list[DiscoveryConfig]:
+    if base.forwarding_enabled and base.windows_host:
+        return [base]
+    if not base.forwarding_enabled:
+        return [base]
+    receivers = discover_receivers(base)
+    targets = [config_for_receiver(base, receiver) for receiver in receivers]
+    if targets:
+        LOGGER.warning(
+            "Publishing %d UniDrop AirDrop targets via Mac gateway port base %d: %s",
+            len(targets),
+            base.port,
+            ", ".join(target.display_name for target in targets),
+        )
+        return targets
+    return [base]
 
 
 def normalized_target(value: str) -> str:
@@ -502,7 +586,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
 
     @property
     def discovery_config(self) -> DiscoveryConfig:
-        return self.server.discovery_config  # type: ignore[attr-defined]
+        return self.server.resolve_config(self)  # type: ignore[attr-defined]
 
     def _read_limited_body(self, max_bytes: int) -> bytes | None:
         raw_length = self.headers.get("Content-Length")
@@ -583,6 +667,7 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             self._send_bytes(503, b"", "application/octet-stream")
 
     def _handle_discover(self) -> None:
+        target_config = self.discovery_config
         body = self._read_limited_body(MAX_DISCOVER_REQUEST_BYTES)
         if body is None:
             return
@@ -599,8 +684,14 @@ class DiscoveryRequestHandler(BaseHTTPRequestHandler):
             except plistlib.InvalidFileException:
                 LOGGER.debug("Discover request from %s is not a plist (%d bytes)", self.client_address[0], len(body))
 
-        payload = build_discover_response(self.discovery_config)
-        LOGGER.info("Answered /Discover for %s to %s", self.discovery_config.display_name, self.client_address[0])
+        payload = build_discover_response(target_config)
+        LOGGER.warning(
+            "Answered /Discover for %s to %s host=%s sni=%s",
+            target_config.display_name,
+            self.client_address[0],
+            self.headers.get("Host", ""),
+            getattr(self.connection, "unidrop_sni", ""),
+        )
         self._send_bytes(200, payload, "application/octet-stream")
 
     def _handle_ask(self) -> None:
@@ -808,17 +899,55 @@ class ScopedIPv6HTTPServer(ThreadingHTTPServer):
         interface_index: int,
         handler: type[BaseHTTPRequestHandler],
         discovery_config: DiscoveryConfig,
+        target_configs: list[DiscoveryConfig],
     ) -> None:
         super().__init__(
             (address, port, 0, interface_index),
             handler,
             bind_and_activate=False,
         )
+        self.target_configs = target_configs
         self.discovery_config = discovery_config
+        self.target_by_host = {}
+        for target in target_configs:
+            self.target_by_host[normalize_request_host(target.bonjour_host)] = target
+            self.target_by_host[normalize_request_host(f"{target.bonjour_host}.local")] = target
         self.socket.setsockopt(socket.IPPROTO_IPV6, IPV6_BOUND_IF, interface_index)
         self.socket.setsockopt(socket.SOL_SOCKET, SO_RECV_ANYIF, 1)
         self.server_bind()
         self.server_activate()
+
+    def resolve_config(self, request: BaseHTTPRequestHandler) -> DiscoveryConfig:
+        if self.discovery_config.awdl_ipv6:
+            return self.discovery_config
+        host_header = request.headers.get("Host", "")
+        sni = str(getattr(request.connection, "unidrop_sni", "") or "")
+        for value in (host_header, sni):
+            target = self.target_by_host.get(normalize_request_host(value))
+            if target is not None:
+                return target
+        if len(self.target_configs) > 1:
+            LOGGER.warning(
+                "Could not identify selected target from host=%r sni=%r; falling back to %s",
+                host_header,
+                sni,
+                self.discovery_config.display_name,
+            )
+        return self.discovery_config
+
+
+def normalize_request_host(value: str) -> str:
+    host = value.strip().lower()
+    if not host:
+        return ""
+    if host.startswith("["):
+        return host
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    host = host.rstrip(".")
+    if host.endswith(".local"):
+        host = host[:-6]
+    return host
 
 
 class LanStatusRequestHandler(BaseHTTPRequestHandler):
@@ -829,6 +958,10 @@ class LanStatusRequestHandler(BaseHTTPRequestHandler):
     @property
     def discovery_config(self) -> DiscoveryConfig:
         return self.server.discovery_config  # type: ignore[attr-defined]
+
+    @property
+    def target_configs(self) -> list[DiscoveryConfig]:
+        return self.server.target_configs  # type: ignore[attr-defined]
 
     @property
     def lan_address(self) -> str:
@@ -853,6 +986,19 @@ class LanStatusRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"status": "not_found"})
             return
         config = self.discovery_config
+        targets = [
+            {
+                "name": target.display_name,
+                "model": target.model_name,
+                "serviceId": target.service_id,
+                "bonjourHost": f"{target.bonjour_host}.local",
+                "awdlIpv6": f"{target.awdl_ipv6}%{target.interface}",
+                "receiverHost": target.windows_host,
+                "receiverPort": target.windows_port,
+                "airdropPort": target.port,
+            }
+            for target in self.target_configs
+        ]
         self._send_json(
             200,
             {
@@ -865,6 +1011,7 @@ class LanStatusRequestHandler(BaseHTTPRequestHandler):
                 "gatewayPort": config.port,
                 "receiverPort": config.windows_port,
                 "airdropPort": config.port,
+                "targets": targets,
             },
         )
 
@@ -885,10 +1032,12 @@ class LanStatusHTTPServer(ThreadingHTTPServer):
         address: str,
         port: int,
         handler: type[BaseHTTPRequestHandler],
-        discovery_config: DiscoveryConfig,
+        gateway_config: DiscoveryConfig,
+        target_configs: list[DiscoveryConfig],
     ) -> None:
         super().__init__((address, port), handler, bind_and_activate=False)
-        self.discovery_config = discovery_config
+        self.target_configs = target_configs
+        self.discovery_config = dataclasses.replace(gateway_config, port=port)
         self.lan_address = address
         self.server_bind()
         self.server_activate()
@@ -1013,15 +1162,17 @@ class BonjourRegistration:
 def write_state(
     runtime_dir: Path,
     config: DiscoveryConfig,
+    target_configs: list[DiscoveryConfig],
     ipv6_address: str,
     interface_index: int,
     server_pid: int,
-    bonjour_pid: int,
+    bonjour_pids: list[int],
     lan_ipv4: str | None = None,
 ) -> None:
     state = {
         "server_pid": server_pid,
-        "bonjour_pid": bonjour_pid,
+        "bonjour_pid": bonjour_pids[0] if bonjour_pids else None,
+        "bonjour_pids": bonjour_pids,
         "display_name": config.display_name,
         "model_name": config.model_name,
         "service_id": config.service_id,
@@ -1035,6 +1186,19 @@ def write_state(
         "lan_gateway_url": f"http://{lan_ipv4}:{config.port}/gateway" if lan_ipv4 else None,
         "txt": {"flags": "136"},
         "transport": "HTTPS/TLS (discovery only)",
+        "targets": [
+            {
+                "display_name": target.display_name,
+                "model_name": target.model_name,
+                "service_id": target.service_id,
+                "bonjour_host": f"{target.bonjour_host}.local.",
+                "awdl_ipv6": f"{target.awdl_ipv6}%{target.interface}",
+                "receiver_host": target.windows_host,
+                "receiver_port": target.windows_port,
+                "airdrop_port": target.port,
+            }
+            for target in target_configs
+        ],
     }
     state_path = runtime_dir / "state.json"
     state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
@@ -1101,26 +1265,39 @@ def run() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    ipv6_address, interface_index = interface_ipv6(config.interface)
+    base_target_configs = build_target_configs(config)
+    native_ipv6_address, interface_index = interface_ipv6(config.interface)
+    target_configs = with_target_awdl_addresses(base_target_configs, native_ipv6_address)
+    primary_config = target_configs[0]
+
     certificate_path, key_path = ensure_certificate(
         args.runtime_dir,
-        f"{config.bonjour_host}.local",
+        f"{primary_config.bonjour_host}.local",
     )
 
     tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     tls_context.load_cert_chain(certificate_path, key_path)
 
+    def remember_sni(sock: ssl.SSLSocket, server_name: str | None, _context: ssl.SSLContext) -> None:
+        try:
+            setattr(sock, "unidrop_sni", server_name or "")
+        except Exception:
+            pass
+
+    tls_context.set_servername_callback(remember_sni)
+
     def start_https_server(
-        address: str,
+        target: DiscoveryConfig,
         index: int,
     ) -> tuple[ScopedIPv6HTTPServer, threading.Thread]:
         https_server = ScopedIPv6HTTPServer(
-            address,
-            config.port,
+            target.awdl_ipv6,
+            target.port,
             index,
             DiscoveryRequestHandler,
-            config,
+            target,
+            target_configs,
         )
         https_server.socket = tls_context.wrap_socket(
             https_server.socket,
@@ -1128,11 +1305,21 @@ def run() -> int:
         )
         thread = threading.Thread(
             target=https_server.serve_forever,
-            name="https-server",
+            name=f"https-server-{target.service_id}",
             daemon=True,
         )
         thread.start()
         return https_server, thread
+
+    def start_https_servers(index: int) -> list[tuple[ScopedIPv6HTTPServer, threading.Thread]]:
+        return [start_https_server(target, index) for target in target_configs]
+
+    def stop_https_servers(servers: list[tuple[ScopedIPv6HTTPServer, threading.Thread]]) -> None:
+        for server, _thread in servers:
+            server.shutdown()
+            server.server_close()
+        for _server, thread in servers:
+            thread.join(timeout=3)
 
     def start_lan_status_server() -> tuple[LanStatusHTTPServer, threading.Thread, str] | None:
         lan_ipv4 = local_lan_ipv4()
@@ -1145,6 +1332,7 @@ def run() -> int:
                 config.port,
                 LanStatusRequestHandler,
                 config,
+                target_configs,
             )
         except OSError as exc:
             LOGGER.warning(
@@ -1163,25 +1351,39 @@ def run() -> int:
         LOGGER.warning("LAN gateway auto-discovery endpoint ready at http://%s:%d/gateway", lan_ipv4, config.port)
         return lan_server, thread, lan_ipv4
 
-    server, server_thread = start_https_server(ipv6_address, interface_index)
-    lan_status = start_lan_status_server()
-    threading.Thread(
-        target=warm_receiver_cache,
-        args=(config,),
-        name="receiver-cache-warmup",
-        daemon=True,
-    ).start()
+    def start_registrations() -> list[BonjourRegistration]:
+        registrations: list[BonjourRegistration] = []
+        for target in target_configs:
+            registration = BonjourRegistration(target, target.awdl_ipv6, args.runtime_dir)
+            registration.start()
+            registrations.append(registration)
+        pids = [registration.process.pid for registration in registrations if registration.process is not None]
+        if pids:
+            (args.runtime_dir / "bonjour.pid").write_text(f"{pids[0]}\n", encoding="ascii")
+        return registrations
 
-    registration = BonjourRegistration(config, ipv6_address, args.runtime_dir)
-    registration.start()
-    assert registration.process is not None
+    def registration_pids(registrations: list[BonjourRegistration]) -> list[int]:
+        return [registration.process.pid for registration in registrations if registration.process is not None]
+
+    servers = start_https_servers(interface_index)
+    lan_status = start_lan_status_server()
+    for target in target_configs:
+        threading.Thread(
+            target=warm_receiver_cache,
+            args=(target,),
+            name=f"receiver-cache-warmup-{target.service_id}",
+            daemon=True,
+        ).start()
+
+    registrations = start_registrations()
     write_state(
         args.runtime_dir,
         config,
-        ipv6_address,
+        target_configs,
+        native_ipv6_address,
         interface_index,
         os.getpid(),
-        registration.process.pid,
+        registration_pids(registrations),
         lan_status[2] if lan_status else None,
     )
 
@@ -1194,13 +1396,13 @@ def run() -> int:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
 
-    LOGGER.info(
-        "Discovery test ready: %s, %s%%%s:%d, service %s",
-        config.display_name,
-        ipv6_address,
+    LOGGER.warning(
+        "Discovery test ready on %s with per-target AirDrop ports: %s",
         config.interface,
-        config.port,
-        config.service_id,
+        ", ".join(
+            f"{target.display_name}={target.awdl_ipv6}%{config.interface}:{target.port}/{target.service_id}"
+            for target in target_configs
+        ),
     )
 
     route_socket = socket.socket(socket.AF_ROUTE, socket.SOCK_RAW, 0)
@@ -1211,8 +1413,9 @@ def run() -> int:
         while not stop_event.is_set():
             readable, _, _ = select.select([route_socket], [], [], 5)
             now = time.monotonic()
-            registration_stopped = (
+            registration_stopped = any(
                 registration.process is None or registration.process.poll() is not None
+                for registration in registrations
             )
             address_check_due = (
                 registration_stopped
@@ -1231,40 +1434,27 @@ def run() -> int:
 
             last_address_check = now
             current_address, current_index = interface_ipv6(config.interface)
-            if (
-                registration_stopped
-                or current_address != ipv6_address
-                or current_index != interface_index
-            ):
-                LOGGER.info(
-                    "Refreshing Bonjour registration after AWDL change: %s -> %s",
-                    ipv6_address,
-                    current_address,
+            if current_address != native_ipv6_address:
+                raise RuntimeError(
+                    f"{config.interface} IPv6 address changed from {native_ipv6_address} to {current_address}; restarting"
                 )
-                address_changed = (
-                    current_address != ipv6_address or current_index != interface_index
-                )
-                registration.stop()
-                if address_changed:
-                    server.shutdown()
-                    server.server_close()
-                    server_thread.join(timeout=3)
-                    server, server_thread = start_https_server(
-                        current_address,
-                        current_index,
-                    )
-                registration = BonjourRegistration(config, current_address, args.runtime_dir)
-                registration.start()
-                assert registration.process is not None
-                ipv6_address = current_address
+            if registration_stopped or current_index != interface_index:
+                LOGGER.info("Refreshing Bonjour registrations after AWDL change")
+                for registration in registrations:
+                    registration.stop()
+                if current_index != interface_index:
+                    stop_https_servers(servers)
+                    servers = start_https_servers(current_index)
+                registrations = start_registrations()
                 interface_index = current_index
                 write_state(
                     args.runtime_dir,
                     config,
-                    ipv6_address,
+                    target_configs,
+                    native_ipv6_address,
                     interface_index,
                     os.getpid(),
-                    registration.process.pid,
+                    registration_pids(registrations),
                     lan_status[2] if lan_status else None,
                 )
     finally:
@@ -1272,12 +1462,11 @@ def run() -> int:
         if lan_status is not None:
             lan_status[0].shutdown()
             lan_status[0].server_close()
-        server.shutdown()
-        server.server_close()
-        registration.stop()
+        stop_https_servers(servers)
+        for registration in registrations:
+            registration.stop()
         if lan_status is not None:
             lan_status[1].join(timeout=3)
-        server_thread.join(timeout=3)
     return 0
 
 

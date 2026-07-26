@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -38,6 +39,7 @@ public final class ReceiverService extends Service {
     private HttpReceiverServer server;
     private SharedPreferences prefs;
     private WifiManager.WifiLock wifiLock;
+    private PowerManager.WakeLock cpuWakeLock;
     private Handler watchdogHandler;
     private int currentPort = 8873;
     private boolean receiverActive;
@@ -78,6 +80,7 @@ public final class ReceiverService extends Service {
         startForeground(NOTIFICATION_ID, notification("UniDrop bereit", "Empfängt auf Port " + port));
         startReceiver(port);
         acquireWifiLock();
+        acquireCpuWakeLock();
         return START_STICKY;
     }
 
@@ -169,6 +172,7 @@ public final class ReceiverService extends Service {
             prefs.edit().putBoolean(KEY_RUNNING, false).putString(KEY_LAST_STATUS, "gestoppt").apply();
         }
         releaseWifiLock();
+        releaseCpuWakeLock();
     }
 
     private void acquireWifiLock() {
@@ -192,6 +196,26 @@ public final class ReceiverService extends Service {
             wifiLock.release();
         }
         wifiLock = null;
+    }
+
+    private void acquireCpuWakeLock() {
+        if (cpuWakeLock != null && cpuWakeLock.isHeld()) {
+            return;
+        }
+        PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (manager == null) {
+            return;
+        }
+        cpuWakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "UniDrop:receiver-cpu");
+        cpuWakeLock.setReferenceCounted(false);
+        cpuWakeLock.acquire();
+    }
+
+    private void releaseCpuWakeLock() {
+        if (cpuWakeLock != null && cpuWakeLock.isHeld()) {
+            cpuWakeLock.release();
+        }
+        cpuWakeLock = null;
     }
 
     private Notification notification(String title, String text) {

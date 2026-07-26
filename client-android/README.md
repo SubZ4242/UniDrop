@@ -49,7 +49,15 @@ enabled = true
 
 The Android app uses a foreground service for reliable receiving. Android may
 still require disabling battery optimization for always-on behavior on Samsung
-devices.
+devices. The current receiver also holds a CPU wake lock while receiving is
+enabled; without battery optimization exemption, Samsung can still mark that
+wake lock as disabled and the phone may stop answering on port `8873`.
+
+For the connected test phone this can be set through ADB:
+
+```sh
+adb shell dumpsys deviceidle whitelist +com.unidrop.receiver
+```
 
 The Android UI also has a "Mac suchen" button. It scans the phone's local `/24`
 network for the Mac gateway endpoint, defaulting to:

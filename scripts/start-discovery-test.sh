@@ -63,7 +63,7 @@ fi
 launchctl bootstrap "gui/$(id -u)" "$SERVICE_PLIST"
 
 ATTEMPT=0
-while [ "$ATTEMPT" -lt 40 ]; do
+while [ "$ATTEMPT" -lt 160 ]; do
     if ! launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
         printf '%s failed to start.\n' "$SERVICE_NAME" >&2
         tail -n 40 "$RUNTIME_DIR/server.log" >&2
