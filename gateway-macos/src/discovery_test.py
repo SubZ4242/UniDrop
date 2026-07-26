@@ -40,6 +40,7 @@ RECEIVER_CACHE_TTL_SECONDS = 60
 RECEIVER_CACHE_PROBE_TIMEOUT_SECONDS = 1.0
 RECEIVER_DISCOVERY_PROBE_TIMEOUT_SECONDS = 1.25
 RECEIVER_DISCOVERY_WORKERS = 32
+RECEIVER_REDISCOVERY_SECONDS = 30
 SERVICE_TYPE = "_airdrop._tcp"
 ADDRESS_SAFETY_CHECK_SECONDS = 60
 SUPPORTED_UPLOAD_CONTENT_TYPES = {
@@ -404,9 +405,10 @@ def model_name_for_receiver(receiver: ReceiverProbe) -> str:
 
 
 def config_for_receiver(base: DiscoveryConfig, receiver: ReceiverProbe) -> DiscoveryConfig:
-    stable = hashlib.sha1(f"{receiver.platform}:{receiver.name}".encode("utf-8")).hexdigest()[:12]
+    stable = hashlib.sha1(f"{receiver.platform}:{receiver.name}:{receiver.host}".encode("utf-8")).hexdigest()[:12]
     host_suffix = receiver.platform or "receiver"
-    bonjour_host = slugify_dns_label(f"unidrop-{host_suffix}-{receiver.name}", "unidrop-receiver")
+    ip_suffix = receiver.host.replace(".", "-")
+    bonjour_host = slugify_dns_label(f"unidrop-{host_suffix}-{receiver.name}-{ip_suffix}", "unidrop-receiver")
     return dataclasses.replace(
         base,
         display_name=receiver.name,
@@ -450,6 +452,20 @@ def build_target_configs(base: DiscoveryConfig) -> list[DiscoveryConfig]:
         )
         return targets
     return [base]
+
+
+def target_signature(target_configs: list[DiscoveryConfig]) -> tuple[tuple[str, str, str, int], ...]:
+    return tuple(
+        sorted(
+            (
+                target.service_id,
+                target.display_name,
+                target.windows_host,
+                target.windows_port,
+            )
+            for target in target_configs
+        )
+    )
 
 
 def normalized_target(value: str) -> str:
@@ -1266,6 +1282,7 @@ def run() -> int:
     )
 
     base_target_configs = build_target_configs(config)
+    active_target_signature = target_signature(base_target_configs)
     native_ipv6_address, interface_index = interface_ipv6(config.interface)
     target_configs = with_target_awdl_addresses(base_target_configs, native_ipv6_address)
     primary_config = target_configs[0]
@@ -1408,11 +1425,26 @@ def run() -> int:
     route_socket = socket.socket(socket.AF_ROUTE, socket.SOCK_RAW, 0)
     route_socket.setblocking(False)
     last_address_check = time.monotonic()
+    last_receiver_discovery = time.monotonic()
 
     try:
         while not stop_event.is_set():
             readable, _, _ = select.select([route_socket], [], [], 5)
             now = time.monotonic()
+            if (
+                config.forwarding_enabled
+                and not config.windows_host
+                and now - last_receiver_discovery >= RECEIVER_REDISCOVERY_SECONDS
+            ):
+                last_receiver_discovery = now
+                current_targets = build_target_configs(config)
+                current_signature = target_signature(current_targets)
+                if current_signature != active_target_signature:
+                    raise RuntimeError(
+                        "Receiver set changed; restarting AirDrop advertisements "
+                        f"from {active_target_signature} to {current_signature}"
+                    )
+
             registration_stopped = any(
                 registration.process is None or registration.process.poll() is not None
                 for registration in registrations

@@ -65,6 +65,11 @@ The app:
 - publishes one AirDrop target per discovered receiver;
 - keeps Windows/Android receivers on port `8873` by default;
 - uses separate internal macOS AirDrop ports per visible target when multiple receivers are online.
+- rescans periodically and restarts its AirDrop advertisements when receivers are added or removed.
+
+Multiple Windows PCs are supported. UniDrop derives each AirDrop service ID from
+the receiver platform, receiver name, and receiver IP address, so two receivers
+with the same visible Windows name do not collide on Bonjour.
 
 Debug commands:
 
